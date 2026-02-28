@@ -49,7 +49,11 @@ const telehealthRoutes = require('./routes/telehealth');
 const auditRoutes = require('./routes/audit');
 const notificationsRoutes = require('./routes/notifications');
 
-// Health check
+// Health check - root and /api/health for Railway
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'Safe Haven EHR Backend is running', version: '1.0.0' });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Safe Haven EHR Backend is running' });
 });
