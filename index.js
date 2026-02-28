@@ -11,11 +11,15 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 
 // CORS Configuration
+const corsOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+  : [];
+
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
-  process.env.CORS_ORIGIN
+  ...corsOrigins
 ].filter(Boolean);
 
 // Middleware
