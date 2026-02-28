@@ -1,7 +1,31 @@
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { toSnakePatient } = require('../utils/transformers');
 const { sendPatientWelcomeEmail } = require('../utils/emailService');
+
+// Helper function to generate temporary password
+const generateTemporaryPassword = () => {
+  // Generate a random password with uppercase, lowercase, numbers, and special char
+  const length = 12;
+  const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+  let password = '';
+  
+  // Ensure at least one of each type
+  password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]; // uppercase
+  password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]; // lowercase
+  password += '0123456789'[Math.floor(Math.random() * 10)]; // number
+  password += '!@#$%^&*'[Math.floor(Math.random() * 8)]; // special
+  
+  // Fill the rest randomly
+  for (let i = password.length; i < length; i++) {
+    password += charset[Math.floor(Math.random() * charset.length)];
+  }
+  
+  // Shuffle the password
+  return password.split('').sort(() => Math.random() - 0.5).join('');
+};
 
 // Get all patients (with filters and pagination)
 const getPatients = asyncHandler(async (req, res) => {
@@ -122,82 +146,166 @@ const getPatient = asyncHandler(async (req, res) => {
 // Create patient
 const createPatient = asyncHandler(async (req, res) => {
   const {
-    userId,
+    // User data
+    username,
+    email,
+    firstName,
+    lastName,
+    phoneNumber,
+    
+    // Patient data
     dateOfBirth,
-    gender,
-    phone,
-    address,
+    street,
     city,
     state,
     zipCode,
+    country,
     emergencyContactName,
     emergencyContactPhone,
-    emergencyContactRelation,
+    emergencyContactRelationship,
+    emergencyContactEmail,
     insuranceProvider,
     insurancePolicyNumber,
     insuranceGroupNumber,
+    insuranceCopay,
+    insuranceDeductible,
     medicalHistory,
     allergies,
-    currentMedications,
     assignedTherapistId,
   } = req.body;
 
-  if (!userId || !dateOfBirth) {
-    return res.status(400).json({ error: 'userId and dateOfBirth are required' });
+  // Validate required fields
+  if (!username || !email || !firstName || !lastName) {
+    return res.status(400).json({ 
+      error: 'username, email, firstName, and lastName are required' 
+    });
   }
 
-  const patient = await prisma.patient.create({
-    data: {
-      userId,
-      dateOfBirth: new Date(dateOfBirth),
-      gender,
-      phone,
-      address,
-      city,
-      state,
-      zipCode,
-      emergencyContactName,
-      emergencyContactPhone,
-      emergencyContactRelation,
-      insuranceProvider,
-      insurancePolicyNumber,
-      insuranceGroupNumber,
-      medicalHistory,
-      allergies,
-      currentMedications,
-      assignedTherapistId,
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      assignedTherapist: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
+  // Check if username or email already exists
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username },
+        { email },
+      ],
     },
   });
 
-  // Send welcome email if patient has therapist assigned
-  if (patient.user.role === 'client' || assignedTherapistId) {
-    const therapistName = patient.assignedTherapist
-      ? `${patient.assignedTherapist.firstName} ${patient.assignedTherapist.lastName}`
-      : null;
-
-    // Note: We don't have the password here since the user was created separately
-    // This email will only include therapist assignment info
-    console.log(`📧 Patient profile created for ${patient.user.email} - Welcome email will be sent during user registration`);
+  if (existingUser) {
+    return res.status(400).json({ 
+      error: existingUser.username === username 
+        ? 'Username already exists' 
+        : 'Email already exists' 
+    });
   }
 
-  return res.status(201).json(patient);
+  // Generate temporary password
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+  // Create user and patient in a transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // Create user account
+    const user = await tx.user.create({
+      data: {
+        username,
+        email,
+        passwordHash,
+        firstName,
+        lastName,
+        phoneNumber,
+        role: 'client',
+        mustChangePassword: true,
+        isActive: true,
+      },
+    });
+
+    // Create patient profile
+    const patient = await tx.patient.create({
+      data: {
+        userId: user.id,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+        street,
+        city,
+        state,
+        zipCode,
+        country,
+        emergencyContactName,
+        emergencyContactPhone,
+        emergencyContactRelationship,
+        emergencyContactEmail,
+        insuranceProvider,
+        insurancePolicyNumber,
+        insuranceGroupNumber,
+        insuranceCopay: insuranceCopay ? parseFloat(insuranceCopay) : null,
+        insuranceDeductible: insuranceDeductible ? parseFloat(insuranceDeductible) : null,
+        medicalHistory,
+        allergies,
+        assignedTherapistId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phoneNumber: true,
+            role: true,
+            isActive: true,
+          },
+        },
+        assignedTherapist: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return { user, patient };
+  });
+
+  const { user, patient } = result;
+
+  // Prepare email data
+  const therapistName = patient.assignedTherapist
+    ? `${patient.assignedTherapist.firstName} ${patient.assignedTherapist.lastName}`
+    : null;
+
+  const emailData = {
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    username: user.username,
+    temporaryPassword,
+    assignedTherapist: therapistName,
+  };
+
+  // Send welcome email asynchronously
+  sendPatientWelcomeEmail(emailData)
+    .then((result) => {
+      if (result.success) {
+        console.log(`✅ Welcome email sent to patient: ${user.email}`);
+      } else {
+        console.error(`❌ Failed to send welcome email to ${user.email}:`, result.error);
+      }
+    })
+    .catch((error) => {
+      console.error(`❌ Error sending welcome email to ${user.email}:`, error);
+    });
+
+  // Transform to snake_case for API response
+  const transformedPatient = toSnakePatient(patient);
+
+  return res.status(201).json({
+    ...transformedPatient,
+    message: 'Patient created successfully. Welcome email sent with login credentials.',
+  });
 });
 
 // Update patient

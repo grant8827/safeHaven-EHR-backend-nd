@@ -27,6 +27,10 @@ const sendPatientWelcomeEmail = async (patientData) => {
   try {
     const transporter = createTransporter();
 
+    // Get the production frontend URL (prefer https over http)
+    const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : [];
+    const frontendUrl = corsOrigins.find(url => url.startsWith('https://')) || corsOrigins[0] || 'http://localhost:5173';
+
     const mailOptions = {
       from: process.env.DEFAULT_FROM_EMAIL,
       to: patientData.email,
@@ -75,7 +79,7 @@ const sendPatientWelcomeEmail = async (patientData) => {
               </ul>
 
               <center>
-                <a href="${process.env.CORS_ORIGIN || 'http://localhost:5173'}/login" class="button">Login to Your Portal</a>
+                <a href="${frontendUrl}/login" class="button">Login to Your Portal</a>
               </center>
 
               <p>If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
@@ -106,7 +110,7 @@ Login Credentials:
 
 ${patientData.assignedTherapist ? `Your assigned therapist: ${patientData.assignedTherapist}\n\n` : ''}
 
-You can now access your patient portal at: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}/login
+You can now access your patient portal at: ${frontendUrl}/login
 
 Best regards,
 Safe Haven EHR Team
