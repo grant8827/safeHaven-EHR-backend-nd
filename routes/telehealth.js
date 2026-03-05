@@ -12,6 +12,8 @@ router.post('/sessions', requireRole('admin', 'therapist', 'staff'), telehealthC
 router.post('/sessions/create_emergency', requireRole('admin', 'therapist', 'staff'), telehealthController.createEmergencySession);
 // Lookup by appointmentId FK — must be BEFORE /:id wildcard
 router.get('/sessions/by-appointment/:appointmentId', telehealthController.getSessionByAppointmentId);
+// my_sessions alias — must be BEFORE /:id wildcard so it doesn't hit getSession
+router.get('/sessions/my_sessions', telehealthController.getSessions);
 router.get('/sessions/:id', telehealthController.getSession);
 router.patch('/sessions/:id', requireRole('admin', 'therapist', 'staff'), telehealthController.updateSession);
 router.put('/sessions/:id', requireRole('admin', 'therapist', 'staff'), telehealthController.updateSession);
