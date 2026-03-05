@@ -149,7 +149,8 @@ const createAppointment = asyncHandler(async (req, res) => {
 
   // Determine appointment type
   const finalAppointmentType = type || appointmentType || 'therapy_session';
-  const isTelehealth = finalAppointmentType === 'telehealth';
+  // Create a telehealth session if type is telehealth OR if telehealthLink was provided
+  const isTelehealth = finalAppointmentType === 'telehealth' || (telehealthLink != null && telehealthLink !== '');
 
   // Calculate duration in minutes
   const durationMinutes = duration || Math.round((new Date(calculatedEndTime) - new Date(startTime)) / 60000);
