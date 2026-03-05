@@ -15,6 +15,9 @@ router.post('/', requireRole('admin', 'therapist', 'staff'), patientsController.
 // Get patient by user ID
 router.get('/user/:userId', requireRole('admin', 'therapist', 'staff'), patientsController.getPatientByUserId);
 
+// Resend welcome email (admin/staff only)
+router.post('/:id/resend-welcome-email', requireRole('admin', 'staff'), patientsController.resendWelcomeEmail);
+
 // Get single patient
 router.get('/:id', requireRole('admin', 'therapist', 'staff', 'client'), patientsController.getPatient);
 

@@ -389,6 +389,79 @@ const deletePatient = asyncHandler(async (req, res) => {
   return res.status(204).send();
 });
 
+// Resend welcome email with a new temporary password
+const resendWelcomeEmail = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Find patient with user info
+  const patient = await prisma.patient.findUnique({
+    where: { id },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+        },
+      },
+      assignedTherapist: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  if (!patient) {
+    return res.status(404).json({ error: 'Patient not found' });
+  }
+
+  // Generate a new temporary password
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+  // Update user with new password and re-flag mustChangePassword
+  await prisma.user.update({
+    where: { id: patient.user.id },
+    data: {
+      passwordHash,
+      mustChangePassword: true,
+    },
+  });
+
+  // Send welcome email
+  const therapistName = patient.assignedTherapist
+    ? `${patient.assignedTherapist.firstName} ${patient.assignedTherapist.lastName}`
+    : null;
+
+  const emailResult = await sendPatientWelcomeEmail({
+    email: patient.user.email,
+    firstName: patient.user.firstName,
+    lastName: patient.user.lastName,
+    username: patient.user.username,
+    temporaryPassword,
+    assignedTherapist: therapistName,
+  });
+
+  if (!emailResult.success) {
+    console.error(`❌ Failed to resend welcome email to ${patient.user.email}:`, emailResult.error);
+    return res.status(500).json({ error: 'Failed to send welcome email. Please try again.' });
+  }
+
+  console.log(`✅ Welcome email resent to patient: ${patient.user.email}`);
+
+  return res.json({
+    message: `Welcome email resent successfully to ${patient.user.email}. A new temporary password has been generated.`,
+  });
+});
+
 // Get patient by user ID
 const getPatientByUserId = asyncHandler(async (req, res) => {
   const { userId } = req.params;
@@ -431,4 +504,5 @@ module.exports = {
   updatePatient,
   deletePatient,
   getPatientByUserId,
+  resendWelcomeEmail,
 };
