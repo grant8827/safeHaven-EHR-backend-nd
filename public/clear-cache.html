@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Cache - TheraCare</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .status {
+            font-size: 18px;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background: #f0f0f0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            text-align: left;
+        }
+        .info h3 {
+            margin-top: 0;
+        }
+        .info ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Clear TheraCare Cache</h1>
+        <p>This will clear all cached data and fix the encrypted text issue on your dashboard.</p>
+        
+        <div id="status" class="status">
+            Ready to clear cache...
+        </div>
+        
+        <button onclick="clearAllCache()">Clear Cache & Logout</button>
+        
+        <div class="info">
+            <h3>What this does:</h3>
+            <ul>
+                <li>✅ Clears localStorage (auth tokens)</li>
+                <li>✅ Clears sessionStorage</li>
+                <li>✅ Clears browser cache</li>
+                <li>✅ Logs you out</li>
+                <li>✅ Redirects to login page</li>
+            </ul>
+            <p><strong>After this:</strong> Login again and you'll see properly decrypted names (no encrypted strings).</p>
+        </div>
+    </div>
+
+    <script>
+        function clearAllCache() {
+            const statusEl = document.getElementById('status');
+            
+            try {
+                // Clear localStorage
+                localStorage.clear();
+                statusEl.innerHTML = '✓ Cleared localStorage<br>';
+                
+                // Clear sessionStorage
+                sessionStorage.clear();
+                statusEl.innerHTML += '✓ Cleared sessionStorage<br>';
+                
+                // Clear all cookies
+                document.cookie.split(";").forEach(function(c) { 
+                    document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+                });
+                statusEl.innerHTML += '✓ Cleared cookies<br>';
+                
+                statusEl.innerHTML += '<br><strong style="color: green;">✓ Cache cleared successfully!</strong><br>';
+                statusEl.innerHTML += '<br>Redirecting to login in 2 seconds...';
+                statusEl.className = 'status success';
+                
+                // Redirect to home/login after 2 seconds
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                
+            } catch (error) {
+                statusEl.innerHTML = '❌ Error: ' + error.message;
+                statusEl.style.background = '#f8d7da';
+                statusEl.style.color = '#721c24';
+            }
+        }
+    </script>
+</body>
+</html>
