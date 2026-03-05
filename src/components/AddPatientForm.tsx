@@ -92,7 +92,7 @@ interface PatientFormData {
 interface AddPatientFormProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (patientData: PatientFormData) => void;
+  onSubmit: (patientData: PatientFormData) => Promise<void>;
 }
 
 const steps = [
@@ -116,6 +116,7 @@ const insuranceProviders = [
 
 const AddPatientForm: React.FC<AddPatientFormProps> = ({ open, onClose, onSubmit }) => {
   const [activeStep, setActiveStep] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<PatientFormData>({
     firstName: '',
     lastName: '',
@@ -214,15 +215,22 @@ const AddPatientForm: React.FC<AddPatientFormProps> = ({ open, onClose, onSubmit
     setActiveStep((prevActiveStep) => prevActiveStep - 1);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     console.log('Form submitted, validating step:', activeStep);
     console.log('Form data:', formData);
     
     if (validateStep(activeStep)) {
       console.log('Validation passed, calling onSubmit');
-      onSubmit(formData);
-      handleReset();
-      onClose();
+      setIsSubmitting(true);
+      try {
+        await onSubmit(formData);
+        handleReset();
+        onClose();
+      } catch {
+        // Error already handled and displayed by parent
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
       console.log('Validation failed, errors:', errors);
     }
@@ -900,10 +908,11 @@ const AddPatientForm: React.FC<AddPatientFormProps> = ({ open, onClose, onSubmit
         {activeStep === steps.length - 1 ? (
           <Button
             variant="contained"
-            onClick={handleSubmit}
+            onClick={() => { void handleSubmit(); }}
             color="primary"
+            disabled={isSubmitting}
           >
-            Add Patient
+            {isSubmitting ? 'Adding Patient...' : 'Add Patient'}
           </Button>
         ) : (
           <Button

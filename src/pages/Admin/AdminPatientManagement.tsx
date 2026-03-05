@@ -423,14 +423,22 @@ const AdminPatientManagement: React.FC = () => {
         emergencyContactRelationship: formData.emergencyContact.relationship || undefined,
         emergencyContactEmail: formData.emergencyContact.email || undefined,
         
+        // Gender
+        gender: formData.gender || undefined,
+        
         // Insurance
         insuranceProvider: formData.insurance.provider || undefined,
         insurancePolicyNumber: formData.insurance.policyNumber || undefined,
         insuranceGroupNumber: formData.insurance.groupNumber || undefined,
+        insuranceMemberID: formData.insurance.memberID || undefined,
+        insuranceEffectiveDate: formData.insurance.effectiveDate
+          ? new Date(formData.insurance.effectiveDate).toISOString().split('T')[0]
+          : undefined,
         
         // Medical
         medicalHistory: formData.medical.medicalHistory || undefined,
         allergies: formData.medical.allergies.join(', ') || undefined,
+        primaryDiagnosis: formData.medical.primaryDiagnosis || undefined,
         assignedTherapistId: formData.medical.primaryTherapist || undefined,
       };
 
@@ -449,9 +457,13 @@ const AdminPatientManagement: React.FC = () => {
 
       console.log('✅ Patient created successfully:', response);
 
-      setSuccessMessage('Patient created successfully! Welcome email sent with login credentials.');
+      const emailSent = (response as unknown as Record<string, unknown>).email_sent !== false;
+      setSuccessMessage(
+        emailSent
+          ? 'Patient created successfully! Welcome email sent with login credentials.'
+          : 'Patient created successfully. Note: Welcome email could not be sent — please share credentials manually.'
+      );
       setShowSuccess(true);
-      setAddPatientOpen(false);
       
       // Clear search term to show the new patient
       setSearchTerm('');
@@ -464,6 +476,7 @@ const AdminPatientManagement: React.FC = () => {
       const errorMsg = getErrorMessage(error, 'Failed to create patient');
       setErrorMessage(errorMsg);
       setShowError(true);
+      throw error; // Re-throw so AddPatientForm stays open for retry
     }
   };
 
@@ -744,7 +757,7 @@ const AdminPatientManagement: React.FC = () => {
                         {new Date(patient.date_of_birth).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        {patient.gender === 'M' ? 'Male' : patient.gender === 'F' ? 'Female' : patient.gender === 'O' ? 'Other' : 'Not specified'}
+                        {patient.gender === 'male' ? 'Male' : patient.gender === 'female' ? 'Female' : patient.gender === 'other' ? 'Other' : patient.gender === 'prefer-not-to-say' ? 'Prefer not to say' : patient.gender || 'Not specified'}
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -810,20 +823,11 @@ const AdminPatientManagement: React.FC = () => {
       </Menu>
 
       {/* Add Patient Dialog */}
-      <Dialog
+      <AddPatientForm
         open={addPatientOpen}
         onClose={() => setAddPatientOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <AddPatientForm
-          open={addPatientOpen}
-          onClose={() => setAddPatientOpen(false)}
-          onSubmit={(formData) => {
-            void handleAddPatient(formData);
-          }}
-        />
-      </Dialog>
+        onSubmit={handleAddPatient}
+      />
 
       {/* Edit Patient Dialog */}
       <Dialog
