@@ -34,6 +34,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { apiClient } from '../../services/apiClient';
 import { useTelehealthMedia } from '../../hooks/telehealth/useTelehealthMedia';
 import { useWebRTC } from '../../hooks/telehealth/useWebRTC';
+import { webSocketService } from '../../services/webSocketService';
 import { SessionDetails } from '../../types';
 
 interface WebSocketMessage {
@@ -70,7 +71,7 @@ const VideoSession: React.FC = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const participantCountRef = useRef(0);
-  const websocketRef = useRef<WebSocket | null>(null);
+  // webSocketService is a module-level singleton – no ref needed
   const isInitiatorRef = useRef(false);
   
   // Participant tracking
@@ -96,9 +97,7 @@ const VideoSession: React.FC = () => {
   } = useTelehealthMedia(showError);
 
   const sendMessage = useCallback((msg: WebSocketMessage) => {
-    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      websocketRef.current.send(JSON.stringify(msg));
-    }
+    webSocketService.sendMessage(msg as unknown as { type: string; [key: string]: unknown });
   }, []);
 
   const {
@@ -149,120 +148,73 @@ const VideoSession: React.FC = () => {
     }
   }, [sessionStartTime]);
 
-  const connectWebSocket = useCallback(() => {
-    if (!roomId) return;
-    
-    // Logic to resolve WS URL
-    const configuredWsBaseUrl = import.meta.env.VITE_WS_BASE_URL as string | undefined;
-    const configuredWsHost = import.meta.env.VITE_WS_HOST as string | undefined;
-    const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const connectWebSocket = useCallback(async () => {
+    if (!roomId || !user) return;
 
-    let wsProtocol: 'ws' | 'wss' = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    let wsHost = window.location.host;
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token') || '';
 
-    if (configuredWsBaseUrl) {
-      try {
-        const wsBase = new URL(configuredWsBaseUrl);
-        wsProtocol = wsBase.protocol === 'wss:' ? 'wss' : 'ws';
-        wsHost = wsBase.host;
-      } catch (urlError) {
-        console.warn('[VIDEO] Invalid VITE_WS_BASE_URL:', urlError);
-      }
-    } else if (configuredApiBaseUrl) {
-      try {
-        const apiUrl = new URL(configuredApiBaseUrl);
-        wsProtocol = apiUrl.protocol === 'https:' ? 'wss' : 'ws';
-        wsHost = apiUrl.host;
-      } catch (urlError) {
-        console.warn('[VIDEO] Invalid VITE_API_BASE_URL for WS fallback:', urlError);
-      }
-    } else if (configuredWsHost) {
-      wsHost = configuredWsHost;
+    try {
+      await webSocketService.connect(sessionId ?? roomId, user.id, {
+        token,
+        displayName: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || 'Participant',
+        role: (user.role as string) ?? 'client',
+      });
+    } catch (err) {
+      console.error('[VIDEO] Socket.io connection error:', err);
+      showError('Failed to connect to session server');
+      return;
     }
 
-    const wsUrl = `${wsProtocol}://${wsHost}/ws/video/${roomId}/`;
-    console.log('[VIDEO] Connecting to WebSocket:', wsUrl);
-    
-    const ws = new WebSocket(wsUrl);
-    websocketRef.current = ws;
+    // Join the signaling room using the roomId from the session record
+    webSocketService.joinRoom(roomId, sessionId ?? undefined);
 
-    ws.onopen = () => {
-      console.log('[VIDEO] WebSocket connected to:', wsUrl);
-      console.log('[VIDEO] Sending participant_joined for user:', user?.id, user?.firstName, user?.lastName);
-      showSuccess('Connected to session server');
-      
-      ws.send(JSON.stringify({
-        type: 'participant_joined',
-        user_id: user?.id,
-        user_name: user?.firstName + ' ' + user?.lastName
-      }));
-    };
+    // ── Inbound signaling handlers ──────────────────────────────────────────
 
-    ws.onmessage = async (event) => {
-      const data = JSON.parse(event.data) as WebSocketMessage;
-      console.log('[VIDEO] WebSocket message:', data.type, 'Full data:', data);
+    webSocketService.on('participant-joined', (data) => {
+      const name = (data.displayName as string) || 'A participant';
+      console.log('[VIDEO] Participant joined:', name);
+      showSuccess(`${name} joined the session`);
+      participantCountRef.current += 1;
+      setParticipantCount(participantCountRef.current + 1);
+      setParticipantName(name);
+      isInitiatorRef.current = true;
+      setTimeout(() => { void createOffer(); }, 500);
+    });
 
-      switch (data.type) {
-        case 'participant_joined':
-          console.log('[VIDEO] Another participant joined:', data.user_name);
-          showSuccess(`${data.user_name || 'A participant'} joined the session`);
-          participantCountRef.current += 1;
-          setParticipantCount(participantCountRef.current + 1); // +1 for self
-          setParticipantName(data.user_name ?? 'Participant');
-          isInitiatorRef.current = true;
-          // Initiator creates offer
-          setTimeout(() => {
-             void createOffer();
-          }, 500);
-          break;
-
-        case 'offer':
-          // Pass localStream to handleOffer because it needs to verify/init PC
-          if (localStream && data.offer) {
-             await handleOffer(data.offer, localStream);
-          } else {
-             console.warn('[VIDEO] Received offer but local stream is not ready');
-          }
-          break;
-
-        case 'answer':
-          if (data.answer) {
-            await handleAnswer(data.answer);
-          }
-          break;
-
-        case 'ice_candidate':
-          if (data.candidate) {
-            await addIceCandidate(data.candidate);
-          }
-          break;
-
-        case 'participant_left':
-          console.log('[VIDEO] Participant left');
-          showError('Other participant left the session');
-          participantCountRef.current = Math.max(0, participantCountRef.current - 1);
-          setParticipantCount(participantCountRef.current + 1); // +1 for self
-          setParticipantName('');
-          // Reset logic handled by useWebRTC closePeerConnection partially, 
-          // but we might want to re-init PC for next participant?
-          closePeerConnection();
-          // We need to re-init PC to be ready for next offer?
-          // Actually, handleOffer re-inits PC if null. So just closing is enough.
-          break;
+    webSocketService.on('offer', async (data) => {
+      const offer = data.offer as RTCSessionDescriptionInit | undefined;
+      if (localStream && offer) {
+        await handleOffer(offer, localStream);
+      } else {
+        console.warn('[VIDEO] Received offer but local stream is not ready');
       }
-    };
+    });
 
-    ws.onerror = (error) => {
-      console.error('[VIDEO] WebSocket error:', error);
-      showError('Failed to connect to session server');
-    };
+    webSocketService.on('answer', async (data) => {
+      const answer = data.answer as RTCSessionDescriptionInit | undefined;
+      if (answer) await handleAnswer(answer);
+    });
 
-    ws.onclose = (event) => {
-      if (event.code !== 1000) {
-        showError('Connection to session server lost');
-      }
-    };
-  }, [roomId, user, showSuccess, showError, createOffer, handleOffer, handleAnswer, addIceCandidate, closePeerConnection, localStream]);
+    webSocketService.on('ice-candidate', async (data) => {
+      const candidate = data.candidate as RTCIceCandidateInit | undefined;
+      if (candidate) await addIceCandidate(candidate);
+    });
+
+    webSocketService.on('participant-left', () => {
+      console.log('[VIDEO] Participant left');
+      showError('Other participant left the session');
+      participantCountRef.current = Math.max(0, participantCountRef.current - 1);
+      setParticipantCount(participantCountRef.current + 1);
+      setParticipantName('');
+      closePeerConnection();
+    });
+
+    webSocketService.on('disconnected', () => {
+      showError('Connection to session server lost');
+    });
+
+    showSuccess('Connected to session server');
+  }, [roomId, sessionId, user, showSuccess, showError, createOffer, handleOffer, handleAnswer, addIceCandidate, closePeerConnection, localStream]);
 
   // Start Session Effect
   useEffect(() => {
@@ -271,7 +223,7 @@ const VideoSession: React.FC = () => {
         const stream = await startLocalMedia();
         if (stream) {
           // Once media is ready, connect signaling
-          connectWebSocket();
+          await connectWebSocket();
           // Initialize PC (as non-initiator by default, until participant joins)
           await initializePeerConnection(stream, false); 
           setSessionStartTime(new Date());
@@ -284,9 +236,7 @@ const VideoSession: React.FC = () => {
     return () => {
       stopLocalMedia();
       closePeerConnection();
-      if (websocketRef.current) {
-        websocketRef.current.close();
-      }
+      webSocketService.disconnect();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]); 
@@ -296,9 +246,7 @@ const VideoSession: React.FC = () => {
   const cleanupSession = useCallback(() => {
     stopLocalMedia();
     closePeerConnection();
-    if (websocketRef.current) {
-      websocketRef.current.close();
-    }
+    webSocketService.disconnect();
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }

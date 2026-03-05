@@ -258,7 +258,8 @@ const TelehealthDashboard: React.FC = () => {
   };
 
   const handleJoinSession = (sessionId: string) => {
-    navigate(`/telehealth/session/${sessionId}`);
+    // Go through the Waiting Room so presence is checked before entering
+    navigate(`/telehealth/waiting/${sessionId}`);
   };
 
   const handleOpenTranscriptsPage = (sessionId?: string) => {
