@@ -126,8 +126,8 @@ const TelehealthDashboard: React.FC = () => {
 
   const loadPatients = async () => {
     try {
-      const response = await apiClient.get('/api/patients/');
-      const patientList = response.data?.results || [];
+      const response = await apiClient.get('/patients/');
+      const patientList = response.data?.results || response.data || [];
       setPatients(patientList);
     } catch (error) {
       console.error('Failed to load patients:', error);
