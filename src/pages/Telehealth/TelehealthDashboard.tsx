@@ -137,19 +137,7 @@ const TelehealthDashboard: React.FC = () => {
   const loadSessions = async () => {
     setLoading(true);
     try {
-      // Fetch sessions from real API - use my_sessions (underscore not hyphen)
-      let response;
-      try {
-        response = await apiClient.get('/telehealth/sessions/my_sessions/');
-      } catch (error: any) {
-        if (error.response?.status === 404) {
-          // Fallback to base endpoint
-          console.log('my_sessions endpoint not found, using base endpoint');
-          response = await apiClient.get('/telehealth/sessions/');
-        } else {
-          throw error;
-        }
-      }
+      const response = await apiClient.get('/telehealth/sessions/');
       
       console.log('Sessions response:', response);
       
