@@ -145,6 +145,7 @@ model Patient {
   state               String?
   zipCode             String?
   country             String?
+  gender              String?
   
   emergencyContactName String?
   emergencyContactRelationship String?
@@ -156,9 +157,12 @@ model Patient {
   insuranceGroupNumber String?
   insuranceCopay      Float?
   insuranceDeductible Float?
+  insuranceMemberID   String?
+  insuranceEffectiveDate DateTime?
   
   medicalHistory      String?
   allergies           String?
+  primaryDiagnosis    String?
   
   assignedTherapistId String?
   assignedTherapist   User?    @relation("assignedTherapist", fields: [assignedTherapistId], references: [id], onDelete: SetNull)

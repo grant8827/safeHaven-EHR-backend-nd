@@ -92,7 +92,12 @@ const toSnakePatient = (patient) => {
     // Medical info
     medical_history: patient.medicalHistory,
     allergies: patient.allergies,
+    primary_diagnosis: patient.primaryDiagnosis,
     
+    // Insurance extra
+    insurance_member_id: patient.insuranceMemberID,
+    insurance_effective_date: patient.insuranceEffectiveDate,
+
     // Therapist
     primary_therapist: patient.assignedTherapistId,
     primary_therapist_name: patient.assignedTherapist 

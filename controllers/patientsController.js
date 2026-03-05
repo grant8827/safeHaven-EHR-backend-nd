@@ -171,7 +171,11 @@ const createPatient = asyncHandler(async (req, res) => {
     insuranceDeductible,
     medicalHistory,
     allergies,
+    primaryDiagnosis,
+    insuranceMemberID,
+    insuranceEffectiveDate,
     assignedTherapistId,
+    gender,
   } = req.body;
 
   // Validate required fields
@@ -181,22 +185,18 @@ const createPatient = asyncHandler(async (req, res) => {
     });
   }
 
-  // Check if username or email already exists
-  const existingUser = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { username },
-        { email },
-      ],
-    },
-  });
+  // Check if email already exists (hard stop — one account per email)
+  const existingByEmail = await prisma.user.findFirst({ where: { email } });
+  if (existingByEmail) {
+    return res.status(400).json({ error: 'A patient with this email already exists' });
+  }
 
-  if (existingUser) {
-    return res.status(400).json({ 
-      error: existingUser.username === username 
-        ? 'Username already exists' 
-        : 'Email already exists' 
-    });
+  // Check if username is taken and auto-suffix if needed
+  let finalUsername = username;
+  const existingByUsername = await prisma.user.findFirst({ where: { username } });
+  if (existingByUsername) {
+    const suffix = Math.random().toString(16).slice(2, 6);
+    finalUsername = `${username}_${suffix}`;
   }
 
   // Generate temporary password
@@ -208,7 +208,7 @@ const createPatient = asyncHandler(async (req, res) => {
     // Create user account
     const user = await tx.user.create({
       data: {
-        username,
+        username: finalUsername,
         email,
         passwordHash,
         firstName,
@@ -239,8 +239,12 @@ const createPatient = asyncHandler(async (req, res) => {
         insuranceGroupNumber,
         insuranceCopay: insuranceCopay ? parseFloat(insuranceCopay) : null,
         insuranceDeductible: insuranceDeductible ? parseFloat(insuranceDeductible) : null,
+        gender,
         medicalHistory,
         allergies,
+        primaryDiagnosis,
+        insuranceMemberID,
+        insuranceEffectiveDate: insuranceEffectiveDate ? new Date(insuranceEffectiveDate) : null,
         assignedTherapistId,
       },
       include: {
@@ -286,25 +290,29 @@ const createPatient = asyncHandler(async (req, res) => {
     assignedTherapist: therapistName,
   };
 
-  // Send welcome email asynchronously
-  sendPatientWelcomeEmail(emailData)
-    .then((result) => {
-      if (result.success) {
-        console.log(`✅ Welcome email sent to patient: ${user.email}`);
-      } else {
-        console.error(`❌ Failed to send welcome email to ${user.email}:`, result.error);
-      }
-    })
-    .catch((error) => {
-      console.error(`❌ Error sending welcome email to ${user.email}:`, error);
-    });
+  // Send welcome email and capture result
+  let emailSent = false;
+  try {
+    const emailResult = await sendPatientWelcomeEmail(emailData);
+    emailSent = emailResult.success === true;
+    if (emailSent) {
+      console.log(`✅ Welcome email sent to patient: ${user.email}`);
+    } else {
+      console.error(`❌ Failed to send welcome email to ${user.email}:`, emailResult.error);
+    }
+  } catch (emailError) {
+    console.error(`❌ Error sending welcome email to ${user.email}:`, emailError);
+  }
 
   // Transform to snake_case for API response
   const transformedPatient = toSnakePatient(patient);
 
   return res.status(201).json({
     ...transformedPatient,
-    message: 'Patient created successfully. Welcome email sent with login credentials.',
+    email_sent: emailSent,
+    message: emailSent
+      ? 'Patient created successfully. Welcome email sent with login credentials.'
+      : 'Patient created successfully. Note: Welcome email could not be sent.',
   });
 });
 
