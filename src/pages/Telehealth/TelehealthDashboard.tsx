@@ -195,6 +195,14 @@ const TelehealthDashboard: React.FC = () => {
       
       console.log('Transformed sessions:', transformedSessions);
       setSessions(transformedSessions);
+
+      // Auto-switch to Emergency tab if there are active emergency sessions
+      const activeEmergency = transformedSessions.filter(
+        (s: TelehealthSession) => s.isEmergency && s.status === 'in-progress'
+      );
+      if (activeEmergency.length > 0) {
+        setTabValue(2);
+      }
     } catch (error: any) {
       console.error('Failed to load sessions:', error);
       console.error('Error response:', error.response);
@@ -309,6 +317,7 @@ const TelehealthDashboard: React.FC = () => {
   const upcomingSessions = filterSessions('scheduled');
   const completedSessions = filterSessions('completed');
   const emergencySessions = sessions.filter(s => s.isEmergency);
+  const activeEmergencySessions = emergencySessions.filter(s => s.status === 'in-progress');
 
   return (
     <Box sx={{ p: 3 }}>
@@ -423,6 +432,27 @@ const TelehealthDashboard: React.FC = () => {
           </Grid>
         )}
       </Grid>
+
+      {/* Active emergency session banner */}
+      {activeEmergencySessions.length > 0 && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              variant="outlined"
+              startIcon={<VideoCall />}
+              onClick={() => handleJoinSession(activeEmergencySessions[0].id)}
+            >
+              Join Now
+            </Button>
+          }
+        >
+          <strong>Emergency session active</strong> — an urgent telehealth session is waiting for you.
+        </Alert>
+      )}
 
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>

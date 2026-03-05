@@ -17,6 +17,7 @@ class WebSocketService {
   private isConnected = false;
   private sessionId: string | null = null;
   private participantId: string | null = null;
+  private currentRoomId: string | null = null;
 
   /**
    * Connect to Socket.io signaling server
@@ -97,6 +98,7 @@ class WebSocketService {
    * Join a signaling room
    */
   joinRoom(roomId: string, sessionId?: string): void {
+    this.currentRoomId = roomId;
     if (this.socket && this.isConnected) {
       this.socket.emit('join-room', {
         roomId,
@@ -133,15 +135,17 @@ class WebSocketService {
       console.warn('[Socket.io] Not connected, dropping message:', message.type);
       return;
     }
+    const msg = message as any;
+    const roomId = this.currentRoomId;
     switch (message.type) {
       case 'offer':
-        this.socket.emit('offer', message.data ?? {});
+        this.socket.emit('offer', { offer: msg.offer, roomId });
         break;
       case 'answer':
-        this.socket.emit('answer', message.data ?? {});
+        this.socket.emit('answer', { answer: msg.answer, roomId });
         break;
       case 'ice-candidate':
-        this.socket.emit('ice-candidate', message.data ?? {});
+        this.socket.emit('ice-candidate', { candidate: msg.candidate, roomId });
         break;
       case 'join':
         this.joinRoom(message.sessionId);

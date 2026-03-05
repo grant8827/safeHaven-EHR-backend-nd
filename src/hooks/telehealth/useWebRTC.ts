@@ -142,7 +142,7 @@ export const useWebRTC = ({
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         sendMessage({
-          type: 'ice_candidate',
+          type: 'ice-candidate',
           candidate: event.candidate,
         });
       }
