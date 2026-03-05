@@ -32,12 +32,12 @@ class WebSocketService {
         this.sessionId = sessionId;
         this.participantId = participantId;
 
-        const apiBase = (import.meta as { env: Record<string, string> }).env.VITE_API_URL ?? '';
+        const apiBase = (import.meta as { env: Record<string, string> }).env.VITE_API_BASE_URL ?? '';
         const backendUrl =
           apiBase
-            ? apiBase.replace(/\/api\/?$/, '')
+            ? apiBase.replace(/\/api\/?$/, '').replace(/\/$/, '')
             : window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
+            ? 'http://localhost:8000'
             : window.location.origin;
 
         this.socket = io(backendUrl, {
