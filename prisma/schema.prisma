@@ -104,6 +104,7 @@ model User {
   createdInvoices    Invoice[] @relation("creator")
   createdNotes       SOAPNote[]
   sessionParticipants TelehealthParticipant[]
+  therapistSessions  TelehealthSession[] @relation("sessionTherapist")
 
   @@index([role])
   @@index([isActive])
@@ -424,6 +425,9 @@ model TelehealthSession {
   
   patientId         String
   patient           Patient           @relation("patient", fields: [patientId], references: [id], onDelete: Cascade)
+
+  therapistId       String?
+  therapistUser     User?             @relation("sessionTherapist", fields: [therapistId], references: [id], onDelete: SetNull)
   
   roomId            String            @unique
   sessionUrl        String

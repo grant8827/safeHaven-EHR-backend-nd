@@ -207,6 +207,7 @@ const createAppointment = asyncHandler(async (req, res) => {
         data: {
           appointmentId: appointment.id,
           patientId,
+          therapistId,
           roomId,
           sessionUrl,
           sessionToken,

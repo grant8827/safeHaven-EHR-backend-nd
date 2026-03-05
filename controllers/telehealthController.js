@@ -22,30 +22,23 @@ const getSessions = asyncHandler(async (req, res) => {
 
   if (status) where.status = status;
 
-  // Access control
+  // Access control — use direct patientId/therapistId columns (not participants junction)
   if (userRole === 'client') {
-    where.participants = {
-      some: {
-        userId,
-      },
-    };
+    // patientId on TelehealthSession is Patient.id, not User.id — look it up
+    const patientRecord = await prisma.patient.findFirst({ where: { userId } });
+    if (!patientRecord) {
+      return res.json({ results: [], count: 0, next: null, previous: null });
+    }
+    where.patientId = patientRecord.id;
   } else {
-    if (patientId) {
-      where.participants = {
-        some: {
-          userId: patientId,
-          role: 'patient',
-        },
-      };
-    }
+    if (patientId) where.patientId = patientId;
     if (therapistId) {
-      where.participants = {
-        some: {
-          userId: therapistId,
-          role: 'therapist',
-        },
-      };
+      where.therapistId = therapistId;
+    } else if (userRole === 'therapist') {
+      // Therapists only see their own sessions
+      where.therapistId = userId;
     }
+    // admin / staff see all sessions (no extra filter)
   }
 
   const [sessions, total] = await Promise.all([
@@ -278,6 +271,7 @@ const createSession = asyncHandler(async (req, res) => {
       roomId: generatedRoomId,
       sessionUrl,
       patientId,
+      therapistId: req.user.id,
       scheduledDuration: scheduledDuration || 60,
       status: 'scheduled',
       participants: {
@@ -603,6 +597,7 @@ const createEmergencySession = asyncHandler(async (req, res) => {
   const session = await prisma.telehealthSession.create({
     data: {
       patientId: patient_id,
+      therapistId,
       roomId,
       sessionUrl,
       status: 'active',
