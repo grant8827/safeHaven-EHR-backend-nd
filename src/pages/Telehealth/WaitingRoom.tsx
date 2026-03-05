@@ -130,8 +130,31 @@ const WaitingRoom: React.FC = () => {
     };
   }, [session, checkPresence]);
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  const [autoJoinCountdown, setAutoJoinCountdown] = useState<number | null>(null);
+  const autoJoinRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Auto-navigate when other participant comes online ────────────────────────
+  useEffect(() => {
+    if (providerOnline === true && session?.room_id) {
+      // Start 3-second countdown then auto-join
+      setAutoJoinCountdown(3);
+      autoJoinRef.current = setInterval(() => {
+        setAutoJoinCountdown((c) => {
+          if (c === null) return null;
+          if (c <= 1) {
+            clearInterval(autoJoinRef.current!);
+            navigate(`/telehealth/session/${sessionId}`);
+            return null;
+          }
+          return c - 1;
+        });
+      }, 1000);
+    } else {
+      if (autoJoinRef.current) clearInterval(autoJoinRef.current);
+      setAutoJoinCountdown(null);
+    }
+    return () => { if (autoJoinRef.current) clearInterval(autoJoinRef.current); };
+  }, [providerOnline, session?.room_id, sessionId, navigate]);
   const formatWait = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -282,12 +305,17 @@ const WaitingRoom: React.FC = () => {
           />
 
           {/* Status message */}
+          {providerOnline === true && autoJoinCountdown !== null && (
+            <Alert severity="success" sx={{ mb: 2 }} icon={<VideoCall />}>
+              {otherParticipantLabel} is online! Joining in {autoJoinCountdown}s…
+            </Alert>
+          )}
           {providerOnline === false && (
             <Alert severity="info" sx={{ mb: 2 }}>
               {otherParticipantLabel} is not yet online. Checking every 10 seconds…
             </Alert>
           )}
-          {providerOnline === true && (
+          {providerOnline === true && autoJoinCountdown === null && (
             <Alert severity="success" sx={{ mb: 2 }}>
               {otherParticipantLabel} is online and ready!
             </Alert>
