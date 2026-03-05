@@ -364,6 +364,8 @@ const AppointmentScheduling: React.FC = () => {
         patientId: formData.patientId,
         therapistId: formData.therapistId,
         appointmentType: appointmentTypeId,
+        // Explicit type flag so backend knows to create a TelehealthSession
+        type: formData.format === 'telehealth' ? 'telehealth' : null,
         startTime: startDateTime.toISOString(),
         endTime: endDateTime.toISOString(),
         duration: formData.duration,

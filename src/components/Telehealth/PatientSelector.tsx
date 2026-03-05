@@ -107,11 +107,15 @@ const PatientSelector: React.FC<PatientSelectorProps> = ({
     setError(null);
 
     try {
-      // Fetch real users from database
-      const response = await apiClient.get('/auth/');
-      const allUsers = Array.isArray(response.data) ? response.data : (response.data?.results || []);
+      // Fetch patients from database
+      const response = await apiClient.get('/patients/');
+      const allUsers = Array.isArray(response.data?.results)
+        ? response.data.results
+        : Array.isArray(response.data)
+        ? response.data
+        : [];
       
-      // Convert users to PatientSessionInfo format
+      // Convert patients to PatientSessionInfo format (response is snake_case from toSnakePatient)
       const patientInfoList: PatientSessionInfo[] = allUsers.map((dbUser: any) => ({
         patient: {
           id: dbUser.id,

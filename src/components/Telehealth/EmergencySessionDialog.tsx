@@ -54,9 +54,9 @@ const EmergencySessionDialog: React.FC<EmergencySessionDialogProps> = ({
 
   const fetchPatients = async () => {
     try {
-      const response = await apiClient.get('/api/patients/');
+      const response = await apiClient.get('/patients/');
       // Handle paginated response
-      const patientList = response.data?.results || [];
+      const patientList = response.data?.results || response.data || [];
       setPatients(patientList);
       
       if (patientList.length === 0) {
