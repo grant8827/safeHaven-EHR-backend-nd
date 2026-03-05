@@ -1,6 +1,7 @@
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { v4: uuidv4 } = require('uuid');
+const { presenceHelpers, telehealthSessionHelpers } = require('../utils/redis');
 
 // Get telehealth sessions
 const getSessions = asyncHandler(async (req, res) => {
@@ -651,6 +652,42 @@ const createEmergencySession = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /telehealth/presence/:userId
+// Returns whether a given user is currently online (for Waiting Room UI)
+const getUserPresence = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const isOnline = await presenceHelpers.isOnline(userId);
+  return res.json({ userId, online: isOnline });
+});
+
+// GET /telehealth/presence/batch
+// Check presence for multiple users at once
+// body: { userIds: ["id1", "id2", ...] }
+const getBatchPresence = asyncHandler(async (req, res) => {
+  const { userIds } = req.body;
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'userIds array required' });
+  }
+  const results = {};
+  await Promise.all(
+    userIds.map(async (id) => {
+      results[id] = await presenceHelpers.isOnline(id);
+    })
+  );
+  return res.json({ presence: results });
+});
+
+// GET /telehealth/sessions/room/:roomId/meta
+// Returns Redis Hash session metadata for a room
+const getRoomMeta = asyncHandler(async (req, res) => {
+  const { roomId } = req.params;
+  const meta = await telehealthSessionHelpers.getSessionMeta(roomId);
+  if (!meta) {
+    return res.status(404).json({ error: 'No active session found for this room' });
+  }
+  return res.json({ roomId, meta });
+});
+
 module.exports = {
   getSessions,
   getSession,
@@ -664,4 +701,7 @@ module.exports = {
   leaveSession,
   saveRecording,
   saveTranscript,
+  getUserPresence,
+  getBatchPresence,
+  getRoomMeta,
 };

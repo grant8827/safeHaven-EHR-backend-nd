@@ -25,4 +25,11 @@ router.post('/sessions/:id/leave', telehealthController.leaveSession);
 router.post('/recordings', requireRole('admin', 'therapist', 'staff'), telehealthController.saveRecording);
 router.post('/transcripts', requireRole('admin', 'therapist', 'staff'), telehealthController.saveTranscript);
 
+// Presence (Redis-backed user online status for Waiting Room)
+router.get('/presence/:userId', telehealthController.getUserPresence);
+router.post('/presence/batch', telehealthController.getBatchPresence);
+
+// Room metadata (Redis Hash)
+router.get('/rooms/:roomId/meta', telehealthController.getRoomMeta);
+
 module.exports = router;

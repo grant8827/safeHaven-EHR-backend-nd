@@ -1,9 +1,11 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
 const { testEmailConnection } = require('./utils/emailService');
 const { redisClient } = require('./utils/redis');
+const { createSignalingServer } = require('./utils/signalingServer');
 
 dotenv.config();
 
@@ -97,14 +99,30 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
+// Create HTTP server and attach Socket.io signaling
+const httpServer = http.createServer(app);
+
+const allowedOriginsForSignaling = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5173',
+  ...corsOrigins,
+].filter(Boolean);
+
+const io = createSignalingServer(httpServer, allowedOriginsForSignaling);
+
+// Make io accessible to controllers if needed
+app.set('io', io);
+
 // Start server
-app.listen(PORT, async () => {
+httpServer.listen(PORT, async () => {
   console.log(`Backend listening on port ${PORT}`);
-  
+  console.log(`🔌 Socket.io signaling server ready on port ${PORT}`);
+
   // Test email configuration on startup
   console.log('\n📧 Testing email service...');
   await testEmailConnection();
-  
+
   // Check Redis connection
   console.log('\n🔴 Checking Redis connection...');
   if (redisClient) {
@@ -117,7 +135,7 @@ app.listen(PORT, async () => {
   } else {
     console.log('⚠️  Redis is not configured (REDIS_URL not set)');
   }
-  
+
   console.log('');
 });
 
