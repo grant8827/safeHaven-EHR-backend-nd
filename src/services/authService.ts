@@ -67,6 +67,7 @@ class AuthService {
           lastName: rawData.user.last_name,
           role: rawData.user.role,
           isActive: rawData.user.is_active,
+          must_change_password: rawData.user.must_change_password ?? rawData.user.mustChangePassword ?? false,
           lastLogin: rawData.user.last_login ? new Date(rawData.user.last_login) : undefined,
           createdAt: rawData.user.created_at ? new Date(rawData.user.created_at) : new Date(),
           updatedAt: rawData.user.updated_at ? new Date(rawData.user.updated_at) : new Date(),
