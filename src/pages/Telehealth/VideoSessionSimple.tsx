@@ -49,6 +49,7 @@ const VideoSession: React.FC = () => {
   const [sessionDuration, setSessionDuration] = useState(0);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<SessionDetails | null>(null);
+  const [sessionError, setSessionError] = useState<'not_found' | 'forbidden' | 'not_started' | null>(null);
 
   // Recording and Transcription
   const [isRecording, setIsRecording] = useState(false);
@@ -113,19 +114,31 @@ const VideoSession: React.FC = () => {
       try {
         const response = await apiClient.get(`/telehealth/sessions/${sessionId}/`);
         const session = response.data as SessionDetails;
+        // Block entry if session hasn't started (still scheduled)
+        if (session.status === 'scheduled') {
+          setSessionError('not_started');
+          return;
+        }
         setRoomId(session.room_id);
         setSessionData(session);
         console.log('[VIDEO] Session loaded:', session);
-      } catch (error) {
-        console.error('[VIDEO] Error fetching session:', error);
-        showError('Failed to load session');
+      } catch (error: unknown) {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status === 404) {
+          setSessionError('not_found');
+        } else if (status === 403) {
+          setSessionError('forbidden');
+        } else {
+          setSessionError('not_found');
+          console.error('[VIDEO] Error fetching session:', error);
+        }
       }
     };
 
     if (sessionId) {
       fetchSession().catch(console.error);
     }
-  }, [sessionId, showError]);
+  }, [sessionId]);
 
   // Session timer
   useEffect(() => {
@@ -412,6 +425,52 @@ const VideoSession: React.FC = () => {
     const s = seconds % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  // Full-screen error state for invalid / inaccessible sessions
+  if (sessionError) {
+    const errorConfig = {
+      not_found: {
+        title: 'Session Not Found',
+        message: 'This telehealth session does not exist or has been removed. Please check the link or contact your provider.',
+        color: '#ef4444',
+      },
+      forbidden: {
+        title: 'Access Denied',
+        message: 'You are not authorized to join this session.',
+        color: '#f97316',
+      },
+      not_started: {
+        title: 'Meeting Not Started',
+        message: 'This session is scheduled but has not started yet. Please wait in the waiting room or come back at your appointment time.',
+        color: '#3b82f6',
+      },
+    }[sessionError];
+
+    return (
+      <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1a1a1a' }}>
+        <Box sx={{ textAlign: 'center', maxWidth: 480, p: 4 }}>
+          <Box sx={{ width: 80, height: 80, borderRadius: '50%', bgcolor: errorConfig.color, display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3 }}>
+            <Typography variant="h3" sx={{ color: 'white' }}>
+              {sessionError === 'not_started' ? '⏳' : '✕'}
+            </Typography>
+          </Box>
+          <Typography variant="h5" sx={{ color: 'white', fontWeight: 700, mb: 2 }}>
+            {errorConfig.title}
+          </Typography>
+          <Typography variant="body1" sx={{ color: 'rgba(255,255,255,0.7)', mb: 4 }}>
+            {errorConfig.message}
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={() => navigate('/telehealth')}
+            sx={{ bgcolor: errorConfig.color, '&:hover': { bgcolor: errorConfig.color, opacity: 0.85 } }}
+          >
+            Back to Telehealth
+          </Button>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#1a1a1a' }}>
