@@ -247,15 +247,27 @@ const parseParticipant = (value: unknown): Participant | null => {
     return null;
   }
 
-  const id = stringFrom(value.id);
+  // Handle both flat format { id, full_name } and nested join-table format { userId, user: { id, firstName, lastName } }
+  const userObj = isRecord(value.user) ? value.user : value;
+  const id = stringFrom(userObj.id) || stringFrom(value.userId);
   if (!id) {
     return null;
   }
 
+  const fullName =
+    stringFrom(userObj.full_name) ||
+    stringFrom(value.full_name) ||
+    stringFrom(value.username) ||
+    (() => {
+      const first = stringFrom(userObj.firstName);
+      const last = stringFrom(userObj.lastName);
+      return first || last ? `${first} ${last}`.trim() : undefined;
+    })();
+
   return {
     id,
-    name: stringFrom(value.full_name) || stringFrom(value.username) || 'Unknown',
-    role: toParticipantRole(value.role),
+    name: fullName || 'Unknown',
+    role: toParticipantRole(userObj.role ?? value.role),
     isOnline: booleanFrom(value.is_online),
   };
 };
@@ -266,10 +278,15 @@ const parseThreadLike = (thread: unknown): ThreadLike | null => {
   }
 
   const id = stringFrom(thread.id);
-  const updatedAt = stringFrom(thread.updated_at);
-  if (!id || !updatedAt) {
+  if (!id) {
     return null;
   }
+
+  // Accept both snake_case (updated_at from backend transform) and camelCase (lastActivity from Prisma)
+  const updatedAt =
+    stringFrom(thread.updated_at) ||
+    stringFrom(thread.lastActivity) ||
+    new Date(0).toISOString();
 
   return {
     id,
@@ -286,17 +303,26 @@ const parseThreadMessageLike = (message: unknown): ThreadMessageLike | null => {
 
   const id = stringFrom(message.id);
   const content = stringFrom(message.content);
-  const createdAt = stringFrom(message.created_at);
+  // Accept both snake_case (created_at) and camelCase (createdAt)
+  const createdAt = stringFrom(message.created_at) || stringFrom(message.createdAt);
   if (!id || !createdAt) {
     return null;
   }
 
-  const sender = isRecord(message.sender)
+  const senderObj = isRecord(message.sender) ? message.sender : null;
+  const sender = senderObj
     ? {
-        id: stringFrom(message.sender.id),
-        full_name: stringFrom(message.sender.full_name),
-        username: stringFrom(message.sender.username),
-        role: stringFrom(message.sender.role),
+        id: stringFrom(senderObj.id),
+        full_name:
+          stringFrom(senderObj.full_name) ||
+          (() => {
+            const first = stringFrom(senderObj.firstName);
+            const last = stringFrom(senderObj.lastName);
+            return first || last ? `${first} ${last}`.trim() : undefined;
+          })() ||
+          stringFrom(senderObj.username),
+        username: stringFrom(senderObj.username),
+        role: stringFrom(senderObj.role),
       }
     : undefined;
 
@@ -305,8 +331,8 @@ const parseThreadMessageLike = (message: unknown): ThreadMessageLike | null => {
     sender,
     content,
     created_at: createdAt,
-    is_read: booleanFrom(message.is_read),
-    is_starred: booleanFrom(message.is_starred),
+    is_read: booleanFrom(message.is_read) || booleanFrom(message.isRead),
+    is_starred: booleanFrom(message.is_starred) || booleanFrom(message.isStarred),
     priority: toPriority(message.priority),
     attachments: Array.isArray(message.attachments) ? (message.attachments as Attachment[]) : [],
   };
