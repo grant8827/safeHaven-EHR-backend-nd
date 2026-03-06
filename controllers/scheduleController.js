@@ -243,10 +243,10 @@ const bookSlot = asyncHandler(async (req, res) => {
 const getTherapists = asyncHandler(async (req, res) => {
   const therapists = await prisma.user.findMany({
     where: {
-      role: { in: ['therapist', 'staff'] },
+      role: 'therapist',
       isActive: { not: false },  // includes true AND null
     },
-    select: { id: true, firstName: true, lastName: true, email: true, role: true },
+    select: { id: true, firstName: true, lastName: true, email: true },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
   });
 
@@ -255,7 +255,6 @@ const getTherapists = asyncHandler(async (req, res) => {
       id: t.id,
       full_name: `${t.firstName} ${t.lastName}`.trim() || t.email,
       email: t.email,
-      role: t.role,
     }))
   );
 });
