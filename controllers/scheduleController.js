@@ -245,20 +245,17 @@ const getTherapists = asyncHandler(async (req, res) => {
     where: {
       role: 'therapist',
       isActive: { not: false },
+      NOT: { firstName: '' },
     },
-    select: { id: true, firstName: true, lastName: true, username: true, email: true },
+    select: { id: true, firstName: true, lastName: true },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
   });
 
   return res.json(
-    therapists.map((t) => {
-      const name = `${t.firstName ?? ''} ${t.lastName ?? ''}`.trim();
-      return {
-        id: t.id,
-        full_name: name || t.username || t.email,
-        email: t.email,
-      };
-    })
+    therapists.map((t) => ({
+      id: t.id,
+      full_name: `${t.firstName} ${t.lastName}`.trim(),
+    }))
   );
 });
 
