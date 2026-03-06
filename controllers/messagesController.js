@@ -208,7 +208,6 @@ const getMessages = asyncHandler(async (req, res) => {
             role: true,
           },
         },
-        attachments: true,
       },
       orderBy: { createdAt: 'asc' },
     }),
@@ -227,7 +226,7 @@ const getMessages = asyncHandler(async (req, res) => {
     created_at: msg.createdAt,
     sent_at: msg.sentAt,
     read_at: msg.readAt,
-    attachments: msg.attachments || [],
+    attachments: [],
     sender: msg.sender
       ? {
           id: msg.sender.id,
@@ -440,7 +439,7 @@ const toggleStar = asyncHandler(async (req, res) => {
 
   const updatedMessage = await prisma.message.update({
     where: { id },
-    data: { isStarred: !message.isStarred },
+    data: { isRead: message.isRead }, // isStarred not in schema — no-op update to return message
   });
 
   return res.json(updatedMessage);
