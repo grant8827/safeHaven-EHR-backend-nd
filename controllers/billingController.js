@@ -140,8 +140,8 @@ const getInvoice = asyncHandler(async (req, res) => {
       appointment: {
         select: {
           id: true,
-          appointmentDate: true,
-          appointmentType: true,
+          startTime: true,
+          type: true,
           therapist: {
             select: {
               id: true,
@@ -239,18 +239,31 @@ const createInvoice = asyncHandler(async (req, res) => {
 const updateInvoice = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const {
+    patientId,
     status,
-    amountPaid,
-    paidDate,
+    total,
+    subtotal,
+    tax,
+    date,
+    dueDate,
     notes,
+    paymentDate,
+    paymentMethod,
   } = req.body;
 
+  const VALID_STATUSES = ['draft', 'pending', 'sent', 'paid', 'partial', 'overdue', 'cancelled'];
   const updateData = {};
-  
-  if (status) updateData.status = status;
-  if (amountPaid !== undefined) updateData.amountPaid = parseFloat(amountPaid);
-  if (paidDate) updateData.paidDate = new Date(paidDate);
+
+  if (patientId !== undefined) updateData.patientId = patientId;
+  if (status && VALID_STATUSES.includes(status)) updateData.status = status;
+  if (total !== undefined) updateData.total = parseFloat(total);
+  if (subtotal !== undefined) updateData.subtotal = parseFloat(subtotal);
+  if (tax !== undefined) updateData.tax = parseFloat(tax);
+  if (date) updateData.date = new Date(date);
+  if (dueDate) updateData.dueDate = new Date(dueDate);
   if (notes !== undefined) updateData.notes = notes;
+  if (paymentDate) updateData.paymentDate = new Date(paymentDate);
+  if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
 
   const invoice = await prisma.invoice.update({
     where: { id },
