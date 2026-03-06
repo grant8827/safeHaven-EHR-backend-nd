@@ -476,6 +476,104 @@ const chatHelpers = {
   },
 };
 
+// ─── Schedule availability helpers ───────────────────────────────────────────
+// Key: sched:avail:therapist:{id}:date:{YYYY-MM-DD}
+// Field: slot ("0800", "0830", …)  Value: "0" unavailable | "1" available | "2" booked
+const scheduleHelpers = {
+  _key: (therapistId, date) => `sched:avail:therapist:${therapistId}:date:${date}`,
+
+  // TTL = seconds to end-of-day + 7 days for automatic cleanup of stale keys
+  _ttl: (date) => {
+    const d = new Date(date);
+    d.setDate(d.getDate() + 8);
+    d.setHours(0, 0, 0, 0);
+    return Math.max(Math.floor((d.getTime() - Date.now()) / 1000), 3600);
+  },
+
+  getSlot: async (therapistId, date, slot) => {
+    if (!redisClient) return '0';
+    try {
+      const key = `sched:avail:therapist:${therapistId}:date:${date}`;
+      const val = await redisClient.hget(key, slot);
+      return val || '0';
+    } catch (err) {
+      console.error('scheduleHelpers.getSlot error:', err.message);
+      return '0';
+    }
+  },
+
+  setSlot: async (therapistId, date, slot, value) => {
+    if (!redisClient) return false;
+    try {
+      const key = `sched:avail:therapist:${therapistId}:date:${date}`;
+      const ttl = scheduleHelpers._ttl(date);
+      await redisClient.hset(key, slot, value);
+      await redisClient.expire(key, ttl);
+      return true;
+    } catch (err) {
+      console.error('scheduleHelpers.setSlot error:', err.message);
+      return false;
+    }
+  },
+
+  getAvailability: async (therapistId, date) => {
+    if (!redisClient) return {};
+    try {
+      const key = `sched:avail:therapist:${therapistId}:date:${date}`;
+      const result = await redisClient.hgetall(key);
+      return result || {};
+    } catch (err) {
+      console.error('scheduleHelpers.getAvailability error:', err.message);
+      return {};
+    }
+  },
+
+  // Lua CAS: atomically change slot "1" -> "2" only if currently "1".
+  // Returns true on success, false if slot was not available (already "0" or "2").
+  atomicBook: async (therapistId, date, slot) => {
+    if (!redisClient) return false;
+    try {
+      const key = `sched:avail:therapist:${therapistId}:date:${date}`;
+      const lua = `
+        local current = redis.call('HGET', KEYS[1], ARGV[1])
+        if current == '1' then
+          redis.call('HSET', KEYS[1], ARGV[1], '2')
+          return 1
+        else
+          return 0
+        end
+      `;
+      const result = await redisClient.eval(lua, 1, key, slot);
+      return result === 1;
+    } catch (err) {
+      console.error('scheduleHelpers.atomicBook error:', err.message);
+      return false;
+    }
+  },
+
+  // Release a booked slot back to available (admin cancel use-case)
+  releaseSlot: async (therapistId, date, slot) => {
+    if (!redisClient) return false;
+    try {
+      const key = `sched:avail:therapist:${therapistId}:date:${date}`;
+      const lua = `
+        local current = redis.call('HGET', KEYS[1], ARGV[1])
+        if current == '2' then
+          redis.call('HSET', KEYS[1], ARGV[1], '1')
+          return 1
+        else
+          return 0
+        end
+      `;
+      await redisClient.eval(lua, 1, key, slot);
+      return true;
+    } catch (err) {
+      console.error('scheduleHelpers.releaseSlot error:', err.message);
+      return false;
+    }
+  },
+};
+
 module.exports = {
   redisClient,
   sessionHelpers,
@@ -485,4 +583,5 @@ module.exports = {
   presenceHelpers,
   telehealthSessionHelpers,
   chatHelpers,
+  scheduleHelpers,
 };

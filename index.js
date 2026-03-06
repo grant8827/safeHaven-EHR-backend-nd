@@ -52,6 +52,7 @@ const billingRoutes = require('./routes/billing');
 const telehealthRoutes = require('./routes/telehealth');
 const auditRoutes = require('./routes/audit');
 const notificationsRoutes = require('./routes/notifications');
+const scheduleRoutes = require('./routes/schedule');
 
 // Health check - root and /api/health for Railway
 app.get('/', (req, res) => {
@@ -75,6 +76,7 @@ v1Router.use('/billing', billingRoutes);
 v1Router.use('/telehealth', telehealthRoutes);
 v1Router.use('/audit', auditRoutes);
 v1Router.use('/notifications', notificationsRoutes);
+v1Router.use('/schedule', scheduleRoutes);
 
 app.use('/api/v1', v1Router);
 
@@ -90,6 +92,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/telehealth', telehealthRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/schedule', scheduleRoutes);
 
 // Error handler (must be last)
 const { errorHandler } = require('./middleware/errorHandler');
