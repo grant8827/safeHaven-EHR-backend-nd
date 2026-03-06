@@ -138,6 +138,8 @@ interface ApiUser {
   full_name?: string;
   first_name?: string;
   last_name?: string;
+  firstName?: string;
+  lastName?: string;
   username?: string;
   role?: string;
   is_online?: boolean;
@@ -225,7 +227,7 @@ const mapApiUser = (user: ApiUser): { id: string; name: string; role: string; is
   id: user.id,
   name:
     user.full_name ||
-    [user.first_name, user.last_name].filter(Boolean).join(' ') ||
+    [user.first_name || user.firstName, user.last_name || user.lastName].filter(Boolean).join(' ') ||
     user.username ||
     'Unknown User',
   role: user.role || 'client',
