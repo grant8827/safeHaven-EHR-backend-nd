@@ -10,22 +10,22 @@ const getThreads = asyncHandler(async (req, res) => {
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const take = parseInt(limit);
 
-  // Find threads where user is sender or reader of any message
+  // Find threads where user is a participant (correct membership check)
+  const participantFilter = { participants: { some: { userId } } };
+
   const [threads, total] = await Promise.all([
     prisma.messageThread.findMany({
-      where: {
-        messages: {
-          some: {
-            OR: [
-              { senderId: userId },
-              { readerId: userId },
-            ],
-          },
-        },
-      },
+      where: participantFilter,
       skip,
       take,
       include: {
+        participants: {
+          include: {
+            user: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+          },
+        },
         messages: {
           take: 1,
           orderBy: { createdAt: 'desc' },
@@ -57,22 +57,43 @@ const getThreads = asyncHandler(async (req, res) => {
       },
       orderBy: { lastActivity: 'desc' },
     }),
-    prisma.messageThread.count({
-      where: {
-        messages: {
-          some: {
-            OR: [
-              { senderId: userId },
-              { readerId: userId },
-            ],
-          },
-        },
-      },
-    }),
+    prisma.messageThread.count({ where: participantFilter }),
   ]);
 
+  // Transform to snake_case fields expected by frontend
+  const transformed = threads.map((thread) => {
+    const lastMsg = thread.messages[0];
+    return {
+      id: thread.id,
+      subject: thread.subject,
+      is_archived: thread.isArchived,
+      updated_at: thread.lastActivity,
+      last_message: lastMsg
+        ? {
+            id: lastMsg.id,
+            content: lastMsg.content,
+            created_at: lastMsg.createdAt,
+            sender: lastMsg.sender
+              ? {
+                  id: lastMsg.sender.id,
+                  full_name: `${lastMsg.sender.firstName} ${lastMsg.sender.lastName}`.trim(),
+                  role: lastMsg.sender.role,
+                }
+              : null,
+          }
+        : null,
+      unread_count: thread._count.messages,
+      participants: thread.participants.map((p) => ({
+        id: p.user.id,
+        full_name: `${p.user.firstName} ${p.user.lastName}`.trim(),
+        role: p.user.role,
+        is_online: false,
+      })),
+    };
+  });
+
   return res.json({
-    results: threads,
+    results: transformed,
     count: total,
     next: skip + take < total ? parseInt(page) + 1 : null,
     previous: page > 1 ? parseInt(page) - 1 : null,
@@ -194,8 +215,30 @@ const getMessages = asyncHandler(async (req, res) => {
     prisma.message.count({ where: { threadId } }),
   ]);
 
+  // Transform to snake_case fields expected by frontend
+  const transformedMessages = messages.map((msg) => ({
+    id: msg.id,
+    thread_id: msg.threadId,
+    content: msg.content,
+    priority: msg.priority,
+    is_read: msg.isRead,
+    is_starred: false,
+    is_encrypted: msg.isEncrypted,
+    created_at: msg.createdAt,
+    sent_at: msg.sentAt,
+    read_at: msg.readAt,
+    attachments: msg.attachments || [],
+    sender: msg.sender
+      ? {
+          id: msg.sender.id,
+          full_name: `${msg.sender.firstName} ${msg.sender.lastName}`.trim(),
+          role: msg.sender.role,
+        }
+      : null,
+  }));
+
   return res.json({
-    results: messages,
+    results: transformedMessages,
     count: total,
     next: skip + take < total ? parseInt(page) + 1 : null,
     previous: page > 1 ? parseInt(page) - 1 : null,
