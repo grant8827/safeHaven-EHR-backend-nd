@@ -36,7 +36,15 @@ router.get('/', authenticate, async (req, res) => {
     },
   });
   
-  res.json(users);
+  res.json(users.map((u) => ({
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    role: u.role,
+    first_name: u.firstName,
+    last_name: u.lastName,
+    full_name: `${u.firstName} ${u.lastName}`.trim(),
+  })));
 });
 
 module.exports = router;
