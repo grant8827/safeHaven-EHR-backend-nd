@@ -38,7 +38,7 @@ export const messageService = {
 
   // Get messages for a specific thread
   getMessages: async (threadId: string): Promise<Message[]> => {
-    const response = await apiClient.get(`/messages/messages/?thread_id=${threadId}`);
+    const response = await apiClient.get(`/messages/threads/${threadId}/messages`);
     return response.data.results || response.data;
   },
 

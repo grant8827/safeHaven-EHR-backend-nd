@@ -65,6 +65,7 @@ import {
   Notifications,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import { useChat } from '../../hooks/useChat';
 import { messageService } from '../../services/messageService';
 import { apiClient } from '../../services/apiClient';
 import { UserRole } from '../../types';
@@ -315,6 +316,20 @@ const Messages: React.FC = () => {
   const { state } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  // ── Real-time chat (Socket.io /chat namespace) ──────────────────────────
+  const token = localStorage.getItem('access_token');
+  const {
+    messages: socketMessages,
+    typingUsers,
+    isConnected: isChatConnected,
+    joinThread,
+    sendMessage: socketSend,
+    startTyping,
+    stopTyping,
+  } = useChat(state.user?.id, token);
+  // ────────────────────────────────────────────────────────────────────────
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [availableUsers, setAvailableUsers] = useState<Array<{id: string, name: string, role: string, isOnline?: boolean}>>([]);
@@ -325,6 +340,46 @@ const Messages: React.FC = () => {
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [tabValue, setTabValue] = useState(0);
+
+  // Join the socket room whenever the active conversation changes
+  useEffect(() => {
+    if (selectedConversation) joinThread(selectedConversation);
+  }, [selectedConversation, joinThread]);
+
+  // Merge incoming socket messages into local state (no duplicates)
+  useEffect(() => {
+    if (socketMessages.length === 0) return;
+    setMessages((prev) => {
+      const byId = new Map(prev.map((m) => [m.id, m]));
+      socketMessages.forEach((sm) => {
+        if (!byId.has(sm.id)) {
+          const conv = conversations.find((c) => c.id === sm.threadId);
+          byId.set(sm.id, {
+            id: sm.id,
+            threadId: sm.threadId,
+            senderId: sm.senderId,
+            senderName: sm.senderName,
+            senderRole: sm.senderRole as Message['senderRole'],
+            receiverId: '',
+            receiverName: '',
+            subject: conv?.title ?? '',
+            content: sm.content,
+            timestamp: sm.timestamp,
+            isRead: sm.isRead,
+            isStarred: false,
+            isArchived: false,
+            priority: sm.priority,
+            attachments: [],
+            isEncrypted: sm.isEncrypted,
+            deliveryStatus: sm.deliveryStatus,
+            tags: [],
+          });
+        }
+      });
+      return Array.from(byId.values());
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socketMessages]);
 
   // Load users from backend when component mounts
   useEffect(() => {
@@ -720,6 +775,27 @@ const Messages: React.FC = () => {
   const handleQuickReply = async () => {
     if (!quickReply.trim() || !selectedConversation) return;
 
+    const trimmedContent = quickReply.trim();
+
+    // ── Real-time path via socket (no REST round-trip) ──────────────────
+    if (isChatConnected) {
+      const sent = socketSend(trimmedContent);
+      if (sent) {
+        setQuickReply('');
+        stopTyping();
+        // Optimistically update sidebar last message
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === selectedConversation
+              ? { ...c, lastMessage: { ...c.lastMessage, content: trimmedContent }, updatedAt: new Date().toISOString() }
+              : c,
+          ),
+        );
+        return;
+      }
+    }
+
+    // ── REST fallback when socket is not connected ──────────────────────
     setIsSendingQuickReply(true);
 
     try {
@@ -1269,13 +1345,26 @@ const Messages: React.FC = () => {
 
                 {/* Quick Reply */}
                 <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+                  {/* Typing indicator */}
+                  {typingUsers.length > 0 && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+                      <CircularProgress size={10} thickness={6} />
+                      <Typography variant="caption" color="text.secondary">
+                        {typingUsers.map((u) => u.displayName).join(', ')}{' '}
+                        {typingUsers.length === 1 ? 'is' : 'are'} typing…
+                      </Typography>
+                    </Box>
+                  )}
                   <TextField
-                    placeholder="Type a quick reply..."
+                    placeholder={isChatConnected ? 'Type a quick reply…' : 'Type a quick reply (offline – will send via REST)…'}
                     fullWidth
                     multiline
                     rows={2}
                     value={quickReply}
-                    onChange={(e) => setQuickReply(e.target.value)}
+                    onChange={(e) => {
+                      setQuickReply(e.target.value);
+                      if (e.target.value) startTyping(); else stopTyping();
+                    }}
                     onKeyPress={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
