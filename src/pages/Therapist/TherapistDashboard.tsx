@@ -360,7 +360,7 @@ const TherapistDashboard: React.FC = () => {
           <ScheduleGrid
             therapistId={state.user.id}
             therapistName={(() => {
-              const u = state.user as Record<string, string | undefined>;
+              const u = state.user as unknown as Record<string, string | undefined>;
               return [u?.firstName || u?.first_name || '', u?.lastName || u?.last_name || ''].join(' ').trim();
             })()}
             weekStart={weekStart}
