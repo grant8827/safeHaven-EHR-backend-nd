@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "nodemon index.js",
     "start": "node index.js",
     "prisma:generate": "prisma generate",
