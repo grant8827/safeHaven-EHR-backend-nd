@@ -584,4 +584,54 @@ module.exports = {
   telehealthSessionHelpers,
   chatHelpers,
   scheduleHelpers,
+  soapDraftHelpers: {
+    // Key: draft:soap:provider:{therapistId}:patient:{patientId}:note:{noteId}
+    _key: (therapistId, patientId, noteId) =>
+      `draft:soap:provider:${therapistId}:patient:${patientId}:note:${noteId}`,
+
+    // Set one or more fields in the draft hash; refreshes 24h TTL
+    setFields: async (therapistId, patientId, noteId, fields) => {
+      if (!redisClient) return false;
+      try {
+        const key = soapDraftHelpers._key(therapistId, patientId, noteId);
+        if (Object.keys(fields).length > 0) {
+          await redisClient.hmset(key, fields);
+          await redisClient.expire(key, 86400); // 24 hours
+        }
+        return true;
+      } catch (err) {
+        console.error('soapDraftHelpers.setFields error:', err.message);
+        return false;
+      }
+    },
+
+    // Get entire draft hash
+    getDraft: async (therapistId, patientId, noteId) => {
+      if (!redisClient) return null;
+      try {
+        const key = soapDraftHelpers._key(therapistId, patientId, noteId);
+        const data = await redisClient.hgetall(key);
+        return data && Object.keys(data).length > 0 ? data : null;
+      } catch (err) {
+        console.error('soapDraftHelpers.getDraft error:', err.message);
+        return null;
+      }
+    },
+
+    // Delete draft after finalization
+    deleteDraft: async (therapistId, patientId, noteId) => {
+      if (!redisClient) return false;
+      try {
+        const key = soapDraftHelpers._key(therapistId, patientId, noteId);
+        await redisClient.del(key);
+        return true;
+      } catch (err) {
+        console.error('soapDraftHelpers.deleteDraft error:', err.message);
+        return false;
+      }
+    },
+  },
 };
+
+// Self-reference fix for soapDraftHelpers internal calls
+const { soapDraftHelpers } = module.exports;

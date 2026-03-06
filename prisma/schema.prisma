@@ -225,11 +225,13 @@ model SOAPNote {
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   
   date          DateTime
-  subjective    String
-  objective     String
-  assessment    String
-  plan          String
+  subjective    String   @default("")
+  objective     String   @default("")
+  assessment    String   @default("")
+  plan          String   @default("")
   
+  status        String   @default("draft")   // draft | finalized | amended
+  contentHash   String?                       // SHA-256 of finalized content
   signature     String?
   signatureDate DateTime?
   isLocked      Boolean  @default(false)
@@ -239,6 +241,7 @@ model SOAPNote {
 
   @@index([patientId])
   @@index([therapistId])
+  @@index([status])
 }
 
 // Billing & Invoices
