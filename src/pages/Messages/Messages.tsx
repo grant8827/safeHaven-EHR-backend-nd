@@ -524,10 +524,15 @@ const Messages: React.FC = () => {
             continue;
           }
 
-          const threadMessages = await messageService.getMessages(thread.id);
-          const parsedThreadMessages = threadMessages
-            .map((rawMessage) => parseThreadMessageLike(rawMessage))
-            .filter((message): message is ThreadMessageLike => message !== null);
+          let parsedThreadMessages: ThreadMessageLike[] = [];
+          try {
+            const threadMessages = await messageService.getMessages(thread.id);
+            parsedThreadMessages = threadMessages
+              .map((rawMessage) => parseThreadMessageLike(rawMessage))
+              .filter((message): message is ThreadMessageLike => message !== null);
+          } catch {
+            // Thread exists but messages failed to load — still show conversation
+          }
 
           const parsedParticipants = thread.participants
             .map((participant) => parseParticipant(participant))
@@ -562,25 +567,41 @@ const Messages: React.FC = () => {
           
           allMessages.push(...convertedMessages);
           
-          // Create conversation from thread
-          if (convertedMessages.length > 0) {
-            const lastMessage = convertedMessages[convertedMessages.length - 1];
-            const participants = parsedParticipants;
-            
-            const unreadCount = convertedMessages.filter(
-              (msg: Message) => !msg.isRead && msg.senderId !== state.user?.id
-            ).length;
-            
-            loadedConversations.push({
-              id: thread.id,
-              participants,
-              lastMessage,
-              unreadCount,
-              isGroup: thread.participants.length > 2,
-              title: thread.subject,
-              updatedAt: thread.updated_at,
-            });
-          }
+          // Always show the thread as a conversation, even with 0 messages
+          const lastMessage = convertedMessages[convertedMessages.length - 1] ?? {
+            id: `placeholder-${thread.id}`,
+            threadId: thread.id,
+            senderId: '',
+            senderName: '',
+            senderRole: 'patient' as Message['senderRole'],
+            receiverId: '',
+            receiverName: '',
+            subject: thread.subject || 'No Subject',
+            content: '',
+            timestamp: thread.updated_at,
+            isRead: true,
+            isStarred: false,
+            isArchived: false,
+            priority: 'normal' as Message['priority'],
+            attachments: [],
+            isEncrypted: false,
+            deliveryStatus: 'sent' as Message['deliveryStatus'],
+            tags: [],
+          };
+
+          const unreadCount = convertedMessages.filter(
+            (msg: Message) => !msg.isRead && msg.senderId !== state.user?.id
+          ).length;
+
+          loadedConversations.push({
+            id: thread.id,
+            participants: parsedParticipants,
+            lastMessage,
+            unreadCount,
+            isGroup: thread.participants.length > 2,
+            title: thread.subject,
+            updatedAt: thread.updated_at,
+          });
         }
         
         // Sort conversations by last message time
@@ -592,8 +613,7 @@ const Messages: React.FC = () => {
         setMessages(allMessages);
       } catch (error) {
         console.error('Failed to load messages:', error);
-        setMessages([]);
-        setConversations([]);
+        // Don't wipe existing state on error
       } finally {
         setIsLoadingMessages(false);
       }
@@ -682,10 +702,15 @@ const Messages: React.FC = () => {
           continue;
         }
 
-        const threadMessages = await messageService.getMessages(thread.id);
-        const parsedThreadMessages = threadMessages
-          .map((rawMessage) => parseThreadMessageLike(rawMessage))
-          .filter((message): message is ThreadMessageLike => message !== null);
+        let parsedThreadMessages: ThreadMessageLike[] = [];
+        try {
+          const threadMessages = await messageService.getMessages(thread.id);
+          parsedThreadMessages = threadMessages
+            .map((rawMessage) => parseThreadMessageLike(rawMessage))
+            .filter((message): message is ThreadMessageLike => message !== null);
+        } catch {
+          // Thread exists but messages failed to load — still show conversation
+        }
 
         const parsedParticipants = thread.participants
           .map((participant) => parseParticipant(participant))
@@ -719,24 +744,41 @@ const Messages: React.FC = () => {
         
         allMessages.push(...convertedMessages);
         
-        if (convertedMessages.length > 0) {
-          const lastMessage = convertedMessages[convertedMessages.length - 1];
-          const participants = parsedParticipants;
-          
-          const unreadCount = convertedMessages.filter(
-            (msg: Message) => !msg.isRead && msg.senderId !== state.user?.id
-          ).length;
-          
-          loadedConversations.push({
-            id: thread.id,
-            participants,
-            lastMessage,
-            unreadCount,
-            isGroup: thread.participants.length > 2,
-            title: thread.subject,
-            updatedAt: thread.updated_at,
-          });
-        }
+        // Always show the thread, even with 0 messages
+        const lastMessage = convertedMessages[convertedMessages.length - 1] ?? {
+          id: `placeholder-${thread.id}`,
+          threadId: thread.id,
+          senderId: '',
+          senderName: '',
+          senderRole: 'patient' as Message['senderRole'],
+          receiverId: '',
+          receiverName: '',
+          subject: thread.subject || 'No Subject',
+          content: '',
+          timestamp: thread.updated_at,
+          isRead: true,
+          isStarred: false,
+          isArchived: false,
+          priority: 'normal' as Message['priority'],
+          attachments: [],
+          isEncrypted: false,
+          deliveryStatus: 'sent' as Message['deliveryStatus'],
+          tags: [],
+        };
+
+        const unreadCount = convertedMessages.filter(
+          (msg: Message) => !msg.isRead && msg.senderId !== state.user?.id
+        ).length;
+
+        loadedConversations.push({
+          id: thread.id,
+          participants: parsedParticipants,
+          lastMessage,
+          unreadCount,
+          isGroup: thread.participants.length > 2,
+          title: thread.subject,
+          updatedAt: thread.updated_at,
+        });
       }
       
       loadedConversations.sort((a, b) => 

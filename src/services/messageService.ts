@@ -32,7 +32,7 @@ export const messageService = {
 
   // Get all message threads for current user
   getThreads: async (): Promise<MessageThread[]> => {
-    const response = await apiClient.get('/messages/threads/');
+    const response = await apiClient.get('/messages/threads');
     return response.data.results || response.data;
   },
 
@@ -48,7 +48,7 @@ export const messageService = {
     content: string;
     priority?: string;
   }): Promise<Message> => {
-    const response = await apiClient.post('/messages/messages/', data);
+    const response = await apiClient.post('/messages/messages', data);
     return response.data;
   },
 
