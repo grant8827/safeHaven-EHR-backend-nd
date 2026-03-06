@@ -126,7 +126,7 @@ function App() {
                     }
                   />
 
-                  {/* Staff Routes (aliased to therapist routes) */
+                  {/* Staff Routes (aliased to therapist routes) */}
                   <Route
                     path="/staff/*"
                     element={
@@ -148,7 +148,7 @@ function App() {
                     }
                   />
 
-                  {/* Client Routes */
+                  {/* Client Routes */}
                   <Route
                     path="/client/*"
                     element={
