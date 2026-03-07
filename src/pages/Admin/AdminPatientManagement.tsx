@@ -29,10 +29,6 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
-  Select,
-  FormControl,
-  InputLabel,
-  CircularProgress,
   type ChipProps,
   useTheme,
   useMediaQuery,
@@ -46,7 +42,6 @@ import {
   EmailOutlined,
   DeleteOutline,
   CheckCircleOutline,
-  AssignmentInd,
 } from '@mui/icons-material';
 import axios from 'axios';
 import AddPatientForm from '../../components/AddPatientForm';
@@ -155,12 +150,6 @@ const AdminPatientManagement: React.FC = () => {
   const [actionPatient, setActionPatient] = useState<BackendPatient | null>(null);
   const [removePatientOpen, setRemovePatientOpen] = useState(false);
   const [completePatientOpen, setCompletePatientOpen] = useState(false);
-
-  // Assign therapist feature
-  const [assignTherapistOpen, setAssignTherapistOpen] = useState(false);
-  const [therapistList, setTherapistList] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedTherapistId, setSelectedTherapistId] = useState<string>('');
-  const [assigningTherapist, setAssigningTherapist] = useState(false);
 
   const getErrorMessage = (error: unknown, fallback: string): string => {
     if (axios.isAxiosError(error)) {
@@ -316,39 +305,6 @@ const AdminPatientManagement: React.FC = () => {
     handleCloseActionsMenu();
   };
 
-  const handleMenuAssignTherapist = () => {
-    if (!actionPatient) return;
-    // Pre-select current therapist if one is already assigned
-    setSelectedTherapistId(actionPatient.primary_therapist || '');
-    setAssignTherapistOpen(true);
-    handleCloseActionsMenu();
-  };
-
-  const handleConfirmAssignTherapist = async () => {
-    if (!actionPatient) return;
-    try {
-      setAssigningTherapist(true);
-      await apiService.patch(`/patients/${actionPatient.id}/`, {
-        assignedTherapistId: selectedTherapistId || null,
-      });
-      const therapistName = therapistList.find((t) => t.id === selectedTherapistId)?.name;
-      setSuccessMessage(
-        therapistName
-          ? `Therapist "${therapistName}" assigned to ${actionPatient.first_name} ${actionPatient.last_name}`
-          : `Therapist removed from ${actionPatient.first_name} ${actionPatient.last_name}`
-      );
-      setShowSuccess(true);
-      await loadPatients();
-    } catch (error: unknown) {
-      setErrorMessage(getErrorMessage(error, 'Failed to assign therapist'));
-      setShowError(true);
-    } finally {
-      setAssigningTherapist(false);
-      setAssignTherapistOpen(false);
-      setActionPatient(null);
-    }
-  };
-
   const handleConfirmRemovePatient = async () => {
     if (!actionPatient) return;
 
@@ -396,23 +352,7 @@ const AdminPatientManagement: React.FC = () => {
   // Load patients on mount
   useEffect(() => {
     void loadPatients();
-    void loadTherapists();
   }, []);
-
-  // Load therapist list for the assign-therapist dialog
-  const loadTherapists = async () => {
-    try {
-      const response = await apiService.get('/users/therapists/');
-      const data = (response.data || response) as Array<{ id: string; firstName?: string; lastName?: string; first_name?: string; last_name?: string; email?: string }>;
-      const list = (Array.isArray(data) ? data : []).map((u) => ({
-        id: u.id,
-        name: `${u.firstName || u.first_name || ''} ${u.lastName || u.last_name || ''}`.trim() || u.email || u.id,
-      }));
-      setTherapistList(list);
-    } catch (error) {
-      console.error('Failed to load therapists:', error);
-    }
-  };
 
   // Filter patients when search or status changes
   useEffect(() => {
@@ -868,14 +808,6 @@ const AdminPatientManagement: React.FC = () => {
           </ListItemIcon>
           <ListItemText>Edit Patient</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleMenuAssignTherapist}>
-          <ListItemIcon>
-            <AssignmentInd fontSize="small" color="primary" />
-          </ListItemIcon>
-          <ListItemText>
-            {actionPatient?.primary_therapist ? 'Change Therapist' : 'Assign Therapist'}
-          </ListItemText>
-        </MenuItem>
         <MenuItem onClick={handleMenuCompletePatient}>
           <ListItemIcon>
             <CheckCircleOutline fontSize="small" />
@@ -889,49 +821,6 @@ const AdminPatientManagement: React.FC = () => {
           <ListItemText>Remove Patient</ListItemText>
         </MenuItem>
       </Menu>
-
-      {/* Assign Therapist Dialog */}
-      <Dialog
-        open={assignTherapistOpen}
-        onClose={() => setAssignTherapistOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          {actionPatient?.primary_therapist ? 'Change Therapist' : 'Assign Therapist'} — {actionPatient?.first_name} {actionPatient?.last_name}
-        </DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Current therapist: <strong>{actionPatient?.primary_therapist_name || 'None assigned'}</strong>
-          </Typography>
-          <FormControl fullWidth>
-            <InputLabel>Select Therapist</InputLabel>
-            <Select
-              value={selectedTherapistId}
-              label="Select Therapist"
-              onChange={(e) => setSelectedTherapistId(e.target.value)}
-            >
-              <MenuItem value=""><em>None (remove assignment)</em></MenuItem>
-              {therapistList.map((t) => (
-                <MenuItem key={t.id} value={t.id}>
-                  {t.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAssignTherapistOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={() => void handleConfirmAssignTherapist()}
-            disabled={assigningTherapist}
-            startIcon={assigningTherapist ? <CircularProgress size={16} /> : <AssignmentInd />}
-          >
-            {assigningTherapist ? 'Saving...' : 'Confirm'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Add Patient Dialog */}
       <AddPatientForm

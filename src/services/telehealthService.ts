@@ -111,20 +111,13 @@ class TelehealthService {
     deviceInfo: DeviceInfo
   ): Promise<ApiResponse<{ participantId: string; iceServers: RTCIceServer[] }>> {
     try {
-      const response = await apiService.post<{ participantId: string; roomId: string; iceServers: RTCIceServer[] }>(`${this.baseUrl}/sessions/${sessionId}/join`, {
+      const response = await apiService.post<{ participantId: string; iceServers: RTCIceServer[] }>(`${this.baseUrl}/sessions/${sessionId}/join`, {
         deviceInfo,
       });
       
       if (response.success && response.data) {
-        // Connect to Socket.io signaling server with auth
-        const token = localStorage.getItem('access_token') ?? '';
-        await webSocketService.connect(
-          sessionId,
-          response.data.participantId,
-          { token }
-        );
-        // Bug 3 fix: join the signaling room now that we have the room_id
-        webSocketService.joinRoom(response.data.roomId, sessionId);
+        // Connect to WebSocket for real-time communication
+        await webSocketService.connect(sessionId, response.data.participantId);
         this.setupWebSocketListeners();
       }
       
@@ -280,17 +273,10 @@ class TelehealthService {
 
     this.webRtcPeerConnection = new RTCPeerConnection(configuration);
     
-    // Bug fix: add local media tracks so the remote peer receives audio/video
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => {
-        this.webRtcPeerConnection!.addTrack(track, this.localStream!);
-      });
-    }
-    
     // Set up event handlers
     this.webRtcPeerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        // Bug 6 fix: broadcast to room (no targetUserId) rather than sending to literal 'all'
+        // Send ICE candidate to remote peer through signaling server
         this.sendSignalingMessage('ice-candidate', event.candidate);
       }
     };
@@ -680,12 +666,10 @@ class TelehealthService {
 
   /**
    * Send signaling message through WebSocket
-   * Bug 6 fix: pass undefined targetUserId so server broadcasts to the room
-   * rather than trying to send to the literal string 'all'.
    */
   private sendSignalingMessage(type: string, data: unknown): void {
     if (type === 'ice-candidate' && data) {
-      webSocketService.sendIceCandidate(data as RTCIceCandidate, undefined as unknown as string);
+      webSocketService.sendIceCandidate(data as RTCIceCandidate, 'all'); // Send to all participants
     }
   }
 
@@ -733,13 +717,11 @@ class TelehealthService {
    */
   private setupWebSocketListeners(): void {
     webSocketService.on('offer', async (data: Record<string, unknown>) => {
-      // Bug 4 fix: server sends fromUserId (not targetParticipantId)
-      const offerData = data as { offer: RTCSessionDescriptionInit; fromUserId: string };
+      const offerData = data as { offer: RTCSessionDescriptionInit; targetParticipantId: string };
       if (this.webRtcPeerConnection && offerData.offer) {
         const answer = await this.createAnswer(offerData.offer);
         if (answer) {
-          // Send answer back to the user who sent the offer
-          webSocketService.sendAnswer(answer, offerData.fromUserId);
+          webSocketService.sendAnswer(answer, offerData.targetParticipantId);
         }
       }
     });
@@ -758,18 +740,13 @@ class TelehealthService {
       }
     });
 
-    // Bug 4 fix: when a peer joins, create and send an offer to start WebRTC negotiation
-    webSocketService.on('participant-joined', async (_data: Record<string, unknown>) => {
-      console.log('Participant joined — creating WebRTC offer');
-      if (!this.webRtcPeerConnection) return;
-      const offer = await this.createOffer();
-      if (offer) {
-        webSocketService.sendOffer(offer, undefined as unknown as string); // broadcast to room
-      }
+    webSocketService.on('chat-message', (data: Record<string, unknown>) => {
+      // Chat messages will be handled by the UI component
+      console.log('Chat message received:', data);
     });
 
-    webSocketService.on('chat-message', (data: Record<string, unknown>) => {
-      console.log('Chat message received:', data);
+    webSocketService.on('participant-joined', (data: Record<string, unknown>) => {
+      console.log('Participant joined:', data);
     });
 
     webSocketService.on('participant-left', (data: Record<string, unknown>) => {

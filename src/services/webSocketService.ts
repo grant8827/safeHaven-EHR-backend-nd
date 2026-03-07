@@ -177,30 +177,24 @@ class WebSocketService {
     }
   }
 
-  /** Send WebRTC offer via Socket.io — Bug 5 fix: use targetUserId not 'to' */
-  sendOffer(offer: RTCSessionDescriptionInit, targetParticipantId: string | undefined): void {
+  /** Send WebRTC offer via Socket.io */
+  sendOffer(offer: RTCSessionDescriptionInit, targetParticipantId: string): void {
     if (this.socket && this.isConnected) {
-      const roomId = this.currentRoomId;
-      const targetUserId = targetParticipantId || undefined;
-      this.socket.emit('offer', { offer, roomId, targetUserId });
+      this.socket.emit('offer', { offer, to: targetParticipantId, from: this.participantId });
     }
   }
 
-  /** Send WebRTC answer via Socket.io — Bug 5 fix: use targetUserId not 'to' */
-  sendAnswer(answer: RTCSessionDescriptionInit, targetParticipantId: string | undefined): void {
+  /** Send WebRTC answer via Socket.io */
+  sendAnswer(answer: RTCSessionDescriptionInit, targetParticipantId: string): void {
     if (this.socket && this.isConnected) {
-      const roomId = this.currentRoomId;
-      const targetUserId = targetParticipantId || undefined;
-      this.socket.emit('answer', { answer, roomId, targetUserId });
+      this.socket.emit('answer', { answer, to: targetParticipantId, from: this.participantId });
     }
   }
 
-  /** Send ICE candidate via Socket.io — Bug 5 fix: use targetUserId not 'to' */
-  sendIceCandidate(candidate: RTCIceCandidateInit, targetParticipantId: string | undefined): void {
+  /** Send ICE candidate via Socket.io */
+  sendIceCandidate(candidate: RTCIceCandidateInit, targetParticipantId: string): void {
     if (this.socket && this.isConnected) {
-      const roomId = this.currentRoomId;
-      const targetUserId = targetParticipantId || undefined;
-      this.socket.emit('ice-candidate', { candidate, roomId, targetUserId });
+      this.socket.emit('ice-candidate', { candidate, to: targetParticipantId, from: this.participantId });
     }
   }
 
