@@ -300,12 +300,15 @@ const createSession = asyncHandler(async (req, res) => {
       scheduledDuration: scheduledDuration || 60,
       status: 'scheduled',
       participants: {
-        create: participantIds && participantIds.length > 0
-          ? participantIds.map((userId) => ({
-              userId,
-              role: 'participant',
-            }))
-          : [],
+        // Always include the creating user (therapist) so joinSession never returns 404
+        create: [
+          { userId: req.user.id, role: 'therapist' },
+          ...(participantIds && participantIds.length > 0
+            ? participantIds
+                .filter((uid) => uid !== req.user.id)
+                .map((uid) => ({ userId: uid, role: 'participant' }))
+            : []),
+        ],
       },
     },
     include: {
@@ -463,44 +466,95 @@ const deleteSession = asyncHandler(async (req, res) => {
   return res.status(204).send();
 });
 
-// Join session (update participant status)
-// Bug 1 fixed: returns iceServers so the client can initialise WebRTC.
-// Bug 2 fixed: auto-creates the participant row if missing (therapist / staff
-//              who created the session are not necessarily in the junction table).
+// Join session — auto-creates participant row if missing (e.g. therapist who created session),
+// stamps joinedAt, and returns ICE server config so the client can initialise WebRTC.
 const joinSession = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const userId = req.user.id;
   const userRole = req.user.role;
 
-  const participant = await prisma.telehealthParticipant.findFirst({
-    where: {
-      sessionId: id,
-      userId,
-    },
+  // Verify session exists first
+  const session = await prisma.telehealthSession.findUnique({
+    where: { id },
+  });
+
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  const isTherapist    = session.therapistId === userId;
+  const isAdminOrStaff = ['admin', 'staff'].includes(userRole);
+
+  // Find existing participant row
+  let participant = await prisma.telehealthParticipant.findFirst({
+    where: { sessionId: id, userId },
   });
 
   if (!participant) {
-    return res.status(404).json({ error: 'Participant not found' });
+    if (isTherapist || isAdminOrStaff) {
+      // Auto-create row for therapist / staff who own the session
+      participant = await prisma.telehealthParticipant.create({
+        data: {
+          sessionId: id,
+          userId,
+          role: isTherapist ? 'therapist' : 'staff',
+          status: 'invited',
+        },
+      });
+    } else {
+      return res.status(403).json({ error: 'You are not authorized to join this session' });
+    }
   }
 
   const updatedParticipant = await prisma.telehealthParticipant.update({
     where: { id: participant.id },
-    data: {
-      joinedAt: new Date(),
-    },
+    data: { joinedAt: new Date() },
     include: {
       session: true,
       user: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
+        select: { id: true, firstName: true, lastName: true },
       },
     },
   });
 
-  return res.json(updatedParticipant);
+  // Build ICE server list from env vars with public fallback
+  const iceServers = [];
+  const stunUrls = process.env.STUN_URLS
+    ? process.env.STUN_URLS.split(',').map((u) => u.trim())
+    : ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'];
+  iceServers.push({ urls: stunUrls });
+
+  const turnUrls = process.env.TURN_URLS;
+  const turnUser = process.env.TURN_USERNAME;
+  const turnCred = process.env.TURN_CREDENTIAL;
+
+  if (turnUrls && turnUser && turnCred) {
+    iceServers.push({
+      urls: turnUrls.split(',').map((u) => u.trim()),
+      username: turnUser,
+      credential: turnCred,
+    });
+  } else {
+    // Public fallback TURN (openrelay.metered.ca)
+    iceServers.push({
+      urls: [
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+        'turn:openrelay.metered.ca:443?transport=udp',
+        'turn:openrelay.metered.ca:3478?transport=udp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    });
+  }
+
+  return res.json({
+    participantId: updatedParticipant.id,
+    userId:        updatedParticipant.userId,
+    role:          updatedParticipant.role,
+    session:       updatedParticipant.session,
+    iceServers,
+  });
 });
 
 // Leave session (update participant status)
