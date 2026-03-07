@@ -1,7 +1,31 @@
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Build
+build
+.cache
 
 # Environment variables
 .env
@@ -11,37 +35,16 @@ node_modules/
 .env.production.local
 
 # Testing
-coverage/
-*.log
+coverage
 
-# Production
-build/
-dist/
-*.tsbuildinfo
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-
-# Prisma
-backend/prisma/migrations/
-backend/node_modules/.prisma/
-
-# Misc
-.cache/
-.parcel-cache/
-.next/
-out/
+# HIPAA Compliance - never commit sensitive data
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+secrets/
+.secrets
 
 # OS
 Thumbs.db
