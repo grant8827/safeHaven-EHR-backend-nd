@@ -75,6 +75,10 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
     const { userId, displayName, userRole } = socket;
     console.log(`[Signaling] 🟢 Connected: ${displayName} (${userId})`);
 
+    // Join a personal room named after the userId so socket.to(userId) routing works.
+    // This is the standard Socket.io pattern for directed 1-to-1 messaging.
+    await socket.join(userId);
+
     // Mark user as online in Redis
     await presenceHelpers.setOnline(userId);
 
