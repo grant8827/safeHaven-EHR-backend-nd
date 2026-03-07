@@ -282,6 +282,15 @@ const createSession = asyncHandler(async (req, res) => {
   const generatedRoomId = roomId || uuidv4();
   const sessionUrl = `${frontendUrl}/telehealth/session/${generatedRoomId}`;
 
+  // Bug 9 fixed: always include the creating therapist as a participant so
+  // they can join their own session without hitting a 404.
+  const therapistParticipant = { userId: req.user.id, role: 'therapist' };
+  const extraParticipants = participantIds && participantIds.length > 0
+    ? participantIds
+        .filter((uid) => uid !== req.user.id) // avoid duplicate therapist row
+        .map((uid) => ({ userId: uid, role: 'participant' }))
+    : [];
+
   const session = await prisma.telehealthSession.create({
     data: {
       roomId: generatedRoomId,
@@ -291,12 +300,7 @@ const createSession = asyncHandler(async (req, res) => {
       scheduledDuration: scheduledDuration || 60,
       status: 'scheduled',
       participants: {
-        create: participantIds && participantIds.length > 0
-          ? participantIds.map((userId) => ({
-              userId,
-              role: 'participant',
-            }))
-          : [],
+        create: [therapistParticipant, ...extraParticipants],
       },
     },
     include: {
@@ -455,39 +459,88 @@ const deleteSession = asyncHandler(async (req, res) => {
 });
 
 // Join session (update participant status)
+// Bug 1 fixed: returns iceServers so the client can initialise WebRTC.
+// Bug 2 fixed: auto-creates the participant row if missing (therapist / staff
+//              who created the session are not necessarily in the junction table).
 const joinSession = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const userId = req.user.id;
+  const userRole = req.user.role;
 
-  const participant = await prisma.telehealthParticipant.findFirst({
-    where: {
-      sessionId: id,
-      userId,
-    },
+  // Ensure the session exists before touching participants
+  const session = await prisma.telehealthSession.findUnique({
+    where: { id },
+    select: { id: true, roomId: true, therapistId: true, patientId: true },
   });
 
-  if (!participant) {
-    return res.status(404).json({ error: 'Participant not found' });
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
   }
 
-  const updatedParticipant = await prisma.telehealthParticipant.update({
-    where: { id: participant.id },
-    data: {
-      joinedAt: new Date(),
-    },
-    include: {
-      session: true,
-      user: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
+  // Upsert participant row — auto-create if absent (fixes 404 for therapist/admin)
+  const existingParticipant = await prisma.telehealthParticipant.findFirst({
+    where: { sessionId: id, userId },
   });
 
-  return res.json(updatedParticipant);
+  let participantRecord;
+  if (existingParticipant) {
+    participantRecord = await prisma.telehealthParticipant.update({
+      where: { id: existingParticipant.id },
+      data: { joinedAt: new Date() },
+    });
+  } else {
+    // Auto-add: assign a sensible role based on who is joining
+    const autoRole =
+      userRole === 'therapist' || userRole === 'admin' || userRole === 'staff'
+        ? 'therapist'
+        : 'patient';
+    participantRecord = await prisma.telehealthParticipant.create({
+      data: {
+        sessionId: id,
+        userId,
+        role: autoRole,
+        joinedAt: new Date(),
+      },
+    });
+  }
+
+  // Build ICE server list from environment variables or sensible defaults
+  const stunUrls = process.env.STUN_URLS
+    ? process.env.STUN_URLS.split(',').map((u) => u.trim()).filter(Boolean)
+    : [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun.cloudflare.com:3478',
+      ];
+
+  const iceServers = stunUrls.map((url) => ({ urls: url }));
+
+  if (process.env.TURN_URLS && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+    iceServers.push({
+      urls: process.env.TURN_URLS.split(',').map((u) => u.trim()),
+      username: process.env.TURN_USERNAME,
+      credential: process.env.TURN_CREDENTIAL,
+    });
+  } else {
+    // Public fallback TURN (rate-limited but sufficient for development)
+    iceServers.push({
+      urls: [
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+        'turns:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    });
+  }
+
+  return res.json({
+    participantId: participantRecord.id,
+    userId,
+    roomId: session.roomId,
+    iceServers,
+  });
 });
 
 // Leave session (update participant status)
