@@ -39,9 +39,6 @@ class TelehealthService {
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
   private dataChannel: RTCDataChannel | null = null;
-  // Bug 3 fix: store room/session ids so joinRoom can be called after connect
-  private _currentRoomId: string | null = null;
-  private _currentSessionId: string | null = null;
   private listeners: Map<string, ((data: any) => void)[]> = new Map();
 
   public on(event: string, callback: (data: any) => void) {
@@ -127,8 +124,6 @@ class TelehealthService {
           { token }
         );
         // Bug 3 fix: join the signaling room now that we have the room_id
-        this._currentRoomId = response.data.roomId;
-        this._currentSessionId = sessionId;
         webSocketService.joinRoom(response.data.roomId, sessionId);
         this.setupWebSocketListeners();
       }
