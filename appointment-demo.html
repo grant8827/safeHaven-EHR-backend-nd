@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TheraCare - Appointment Management System Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 2.8rem;
+            font-weight: 700;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 1.2rem;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+        
+        .feature-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        }
+        
+        .feature-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-size: 24px;
+            color: white;
+        }
+        
+        .calendar-icon { background: linear-gradient(135deg, #3498db, #2980b9); }
+        .schedule-icon { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        .video-icon { background: linear-gradient(135deg, #9b59b6, #8e44ad); }
+        .analytics-icon { background: linear-gradient(135deg, #f39c12, #e67e22); }
+        .notifications-icon { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+        .security-icon { background: linear-gradient(135deg, #34495e, #2c3e50); }
+        
+        .feature-title {
+            color: #2c3e50;
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+        
+        .feature-list {
+            list-style: none;
+            margin: 15px 0;
+        }
+        
+        .feature-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            position: relative;
+            padding-left: 20px;
+        }
+        
+        .feature-list li:before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #27ae60;
+            font-weight: bold;
+        }
+        
+        .demo-section {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+            margin-bottom: 30px;
+        }
+        
+        .demo-header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        
+        .demo-header h2 {
+            color: #2c3e50;
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .appointment-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .appointment-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+        }
+        
+        .appointment-card:hover {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .appointment-time {
+            font-weight: bold;
+            color: #1976d2;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+        }
+        
+        .patient-info {
+            margin-bottom: 10px;
+        }
+        
+        .patient-name {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .appointment-type {
+            display: inline-block;
+            background: #e1f5fe;
+            color: #0277bd;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin: 5px 0;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-confirmed { background: #d4edda; color: #155724; }
+        .status-scheduled { background: #cce5ff; color: #004085; }
+        .status-completed { background: #d1ecf1; color: #0c5460; }
+        
+        .tech-stack {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+            margin-bottom: 30px;
+        }
+        
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .tech-item {
+            text-align: center;
+            padding: 20px;
+            border: 2px solid #eee;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .tech-item:hover {
+            border-color: #3498db;
+            background: #f8f9fa;
+        }
+        
+        .tech-logo {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .cta-section {
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background: white;
+            color: #667eea;
+            padding: 15px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .cta-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2.2rem;
+            }
+            
+            .container {
+                padding: 10px;
+            }
+            
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🏥 TheraCare Appointment Management</h1>
+            <p>Comprehensive HIPAA-Compliant Appointment Scheduling System</p>
+        </div>
+
+        <!-- Features Section -->
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon calendar-icon">📅</div>
+                    <h3 class="feature-title">Smart Calendar Management</h3>
+                </div>
+                <ul class="feature-list">
+                    <li>Daily, weekly, and monthly calendar views</li>
+                    <li>Real-time availability checking</li>
+                    <li>Drag-and-drop appointment scheduling</li>
+                    <li>Automatic conflict resolution</li>
+                    <li>Therapist and room availability tracking</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon schedule-icon">⏰</div>
+                    <h3 class="feature-title">Advanced Scheduling</h3>
+                </div>
+                <ul class="feature-list">
+                    <li>Multiple appointment types (Initial, Follow-up, Group, Assessment)</li>
+                    <li>Flexible duration settings (15-180 minutes)</li>
+                    <li>Recurring appointment patterns</li>
+                    <li>Emergency appointment handling</li>
+                    <li>Waitlist management system</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon video-icon">📹</div>
+                    <h3 class="feature-title">Multi-Format Support</h3>
+                </div>
+                <ul class="feature-list">
+                    <li>In-person appointments with room booking</li>
+                    <li>Telehealth sessions with video integration</li>
+                    <li>Phone consultations</li>
+                    <li>Automatic meeting link generation</li>
+                    <li>Session recording capabilities</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon analytics-icon">📊</div>
+                    <h3 class="feature-title">Analytics & Reporting</h3>
+                </div>
+                <ul class="feature-list">
+                    <li>Appointment analytics and trends</li>
+                    <li>No-show rate tracking</li>
+                    <li>Therapist utilization reports</li>
+                    <li>Revenue and billing integration</li>
+                    <li>Custom report generation</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon notifications-icon">🔔</div>
+                    <h3 class="feature-title">Smart Notifications</h3>
+                </div>
+                <ul class="feature-list">
+                    <li>Automated appointment reminders (SMS/Email)</li>
+                    <li>Customizable reminder schedules</li>
+                    <li>Real-time status updates</li>
+                    <li>Cancellation and rescheduling alerts</li>
+                    <li>Emergency notification system</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon security-icon">🔐</div>
+                    <h3 class="feature-title">Security & Compliance</h3>
+                </div>
+                <ul class="feature-list">
+                    <li>HIPAA-compliant data encryption</li>
+                    <li>Role-based access control</li>
+                    <li>Audit trail and logging</li>
+                    <li>Secure patient data handling</li>
+                    <li>Backup and disaster recovery</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Demo Appointments Section -->
+        <div class="demo-section">
+            <div class="demo-header">
+                <h2>📋 Today's Appointment Schedule</h2>
+                <p>Real-time view of daily appointments with status tracking</p>
+            </div>
+            
+            <div class="appointment-grid">
+                <div class="appointment-card">
+                    <div class="appointment-time">09:00 AM - 10:00 AM</div>
+                    <div class="patient-info">
+                        <div class="patient-name">John Doe</div>
+                        <div>Dr. Sarah Wilson • Room 101</div>
+                    </div>
+                    <div class="appointment-type">Follow-up Session</div>
+                    <div class="status-badge status-confirmed">Confirmed</div>
+                </div>
+
+                <div class="appointment-card">
+                    <div class="appointment-time">11:00 AM - 11:45 AM</div>
+                    <div class="patient-info">
+                        <div class="patient-name">Jane Smith</div>
+                        <div>Dr. Michael Johnson • Telehealth</div>
+                    </div>
+                    <div class="appointment-type">Initial Consultation</div>
+                    <div class="status-badge status-scheduled">Scheduled</div>
+                </div>
+
+                <div class="appointment-card">
+                    <div class="appointment-time">02:00 PM - 03:00 PM</div>
+                    <div class="patient-info">
+                        <div class="patient-name">Michael Johnson</div>
+                        <div>Dr. Emily Davis • Room 203</div>
+                    </div>
+                    <div class="appointment-type">Assessment</div>
+                    <div class="status-badge status-completed">Completed</div>
+                </div>
+
+                <div class="appointment-card">
+                    <div class="appointment-time">03:30 PM - 04:30 PM</div>
+                    <div class="patient-info">
+                        <div class="patient-name">Sarah Wilson</div>
+                        <div>Dr. Robert Martinez • Phone</div>
+                    </div>
+                    <div class="appointment-type">Group Therapy</div>
+                    <div class="status-badge status-confirmed">Confirmed</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Technology Stack -->
+        <div class="tech-stack">
+            <div class="demo-header">
+                <h2>⚡ Built with Modern Technology</h2>
+                <p>Enterprise-grade technology stack for reliability and performance</p>
+            </div>
+            
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <div class="tech-logo">⚛️</div>
+                    <h4>React 18</h4>
+                    <p>Modern UI Framework</p>
+                </div>
+                <div class="tech-item">
+                    <div class="tech-logo">📘</div>
+                    <h4>TypeScript</h4>
+                    <p>Type Safety</p>
+                </div>
+                <div class="tech-item">
+                    <div class="tech-logo">🎨</div>
+                    <h4>Material-UI</h4>
+                    <p>Design System</p>
+                </div>
+                <div class="tech-item">
+                    <div class="tech-logo">🐍</div>
+                    <h4>Django</h4>
+                    <p>Backend Framework</p>
+                </div>
+                <div class="tech-item">
+                    <div class="tech-logo">🗃️</div>
+                    <h4>PostgreSQL</h4>
+                    <p>Database</p>
+                </div>
+                <div class="tech-item">
+                    <div class="tech-logo">🔐</div>
+                    <h4>JWT Auth</h4>
+                    <p>Secure Authentication</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Features Summary -->
+        <div class="demo-section">
+            <div class="demo-header">
+                <h2>🚀 Key System Capabilities</h2>
+            </div>
+            
+            <div class="appointment-grid">
+                <div class="appointment-card">
+                    <h4>📊 Comprehensive Dashboard</h4>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li>✅ Real-time appointment overview</li>
+                        <li>✅ Quick stats and KPIs</li>
+                        <li>✅ System health monitoring</li>
+                        <li>✅ Recent activity tracking</li>
+                    </ul>
+                </div>
+
+                <div class="appointment-card">
+                    <h4>👥 Role-Based Access</h4>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li>✅ Admin full system control</li>
+                        <li>✅ Therapist patient management</li>
+                        <li>✅ Patient self-service portal</li>
+                        <li>✅ Staff appointment coordination</li>
+                    </ul>
+                </div>
+
+                <div class="appointment-card">
+                    <h4>📱 Multi-Platform Support</h4>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li>✅ Responsive web interface</li>
+                        <li>✅ Mobile-optimized design</li>
+                        <li>✅ Tablet compatibility</li>
+                        <li>✅ Cross-browser support</li>
+                    </ul>
+                </div>
+
+                <div class="appointment-card">
+                    <h4>🔄 Integration Ready</h4>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li>✅ EHR system integration</li>
+                        <li>✅ Billing system connectivity</li>
+                        <li>✅ Insurance verification</li>
+                        <li>✅ Third-party calendar sync</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Call to Action -->
+        <div class="cta-section">
+            <h2>Ready to Transform Your Practice?</h2>
+            <p>Experience the power of modern appointment management with TheraCare's comprehensive solution.</p>
+            <a href="#" class="cta-button">Start Your Demo Today</a>
+        </div>
+    </div>
+
+    <script>
+        // Add some interactive effects
+        document.addEventListener('DOMContentLoaded', function() {
+            // Animate cards on scroll
+            const cards = document.querySelectorAll('.feature-card, .appointment-card');
+            
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.style.opacity = '1';
+                        entry.target.style.transform = 'translateY(0)';
+                    }
+                });
+            });
+
+            cards.forEach(card => {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(20px)';
+                card.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+                observer.observe(card);
+            });
+
+            // Add click effects to appointment cards
+            const appointmentCards = document.querySelectorAll('.appointment-card');
+            appointmentCards.forEach(card => {
+                card.addEventListener('click', function() {
+                    this.style.transform = 'scale(1.02)';
+                    setTimeout(() => {
+                        this.style.transform = 'scale(1)';
+                    }, 200);
+                });
+            });
+        });
+    </script>
+</body>
+</html>
