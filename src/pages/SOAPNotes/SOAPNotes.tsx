@@ -1,566 +1,427 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Box,
-  Typography,
-  Paper,
-  Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Chip,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Grid,
-  Card,
-  CardContent,
-  Divider,
-  MenuItem,
-  Alert,
-  CircularProgress,
-  useTheme,
-  useMediaQuery,
+  Box, Typography, Paper, Button, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, Chip, IconButton, Dialog,
+  DialogTitle, DialogContent, DialogActions, TextField, Grid,
+  Alert, CircularProgress, Tooltip, Snackbar,
+  FormControl, InputLabel, Select, MenuItem,
 } from '@mui/material';
 import {
-  Add,
-  Edit,
-  Visibility,
-  Assignment,
-  Schedule,
-  Save,
-  Cancel,
-  CheckCircle
+  Add, Edit, Visibility, Lock, CheckCircle, Cancel,
+  AutorenewOutlined, CloudDoneOutlined, ErrorOutline,
 } from '@mui/icons-material';
 import { apiClient } from '../../services/apiClient';
+import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SOAPNote {
   id: string;
-  patient: string;
-  patient_name: string;
-  therapist: string;
-  therapist_name: string;
-  appointment: string | null;
-  appointment_details: {
-    id: string;
-    start_datetime: string;
-    end_datetime: string;
-    appointment_type: string | null;
-  } | null;
-  session_date: string;
-  session_duration: number | null;
-  chief_complaint: string;
+  patientId: string;
+  therapistId: string;
+  patient: { id: string; user: { id: string; firstName: string; lastName: string } };
+  therapist: { id: string; firstName: string; lastName: string };
+  appointment?: { id: string; startTime?: string; type?: string } | null;
+  date: string;
   subjective: string;
   objective: string;
   assessment: string;
   plan: string;
   status: 'draft' | 'finalized' | 'amended';
-  created_at: string;
-  updated_at: string;
-  finalized_at: string | null;
+  isLocked: boolean;
+  contentHash?: string;
+  signature?: string;
+  signatureDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  _hasDraft?: boolean;
 }
 
+interface Patient { id: string; user: { firstName: string; lastName: string } }
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+// ─── Debounce hook ────────────────────────────────────────────────────────────
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+// ─── SaveStatusBadge ─────────────────────────────────────────────────────────
+
+const SaveStatusBadge: React.FC<{ status: SaveStatus; savedAt: string | null }> = ({ status, savedAt }) => {
+  if (status === 'saving') return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
+      <AutorenewOutlined fontSize="small" sx={{ animation: 'spin 1s linear infinite', '@keyframes spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } }} />
+      <Typography variant="caption">Saving…</Typography>
+    </Box>
+  );
+  if (status === 'saved') return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'success.main' }}>
+      <CloudDoneOutlined fontSize="small" />
+      <Typography variant="caption">Saved {savedAt ? format(new Date(savedAt), 'h:mm:ss a') : ''}</Typography>
+    </Box>
+  );
+  if (status === 'error') return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'error.main' }}>
+      <ErrorOutline fontSize="small" />
+      <Typography variant="caption">Save failed</Typography>
+    </Box>
+  );
+  return null;
+};
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 const SOAPNotes: React.FC = () => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [soapNotes, setSoapNotes] = useState<SOAPNote[]>([]);
-  const [stats, setStats] = useState({
-    completedThisWeek: 0,
-    draftNotes: 0,
-    overdueNotes: 0
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { state: authState } = useAuth();
+  const user = authState.user as unknown as Record<string, string | undefined>;
 
+  // ── Lists ──
+  const [notes, setNotes]         = useState<SOAPNote[]>([]);
+  const [patients, setPatients]   = useState<Patient[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+
+  // ── Editor state ──
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [activeNote, setActiveNote] = useState<SOAPNote | null>(null);
+  const [fields, setFields]         = useState({ subjective: '', objective: '', assessment: '', plan: '' });
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [savedAt, setSavedAt]       = useState<string | null>(null);
+  const [viewOnly, setViewOnly]     = useState(false);
+
+  // ── New note dialog ──
+  const [newOpen, setNewOpen]       = useState(false);
+  const [newPatientId, setNewPatientId] = useState('');
+  const [creating, setCreating]     = useState(false);
+
+  // ── Finalize dialog ──
+  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [finalizing, setFinalizing]     = useState(false);
+  const [signature, setSignature]       = useState('');
+
+  // ── Snackbar ──
+  const [snack, setSnack] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({ open: false, msg: '', severity: 'success' });
+
+  // Track last-saved values so we don't re-save unchanged content
+  const lastSaved = useRef({ subjective: '', objective: '', assessment: '', plan: '' });
+
+  // ── Load notes + patients ──
   useEffect(() => {
-    loadSOAPNotes();
-  }, []);
-
-  const loadSOAPNotes = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const notesRes = await apiClient.get('/soap-notes/soap-notes/');
-      const statsRes = await apiClient.get('/soap-notes/soap-notes/stats/');
-      
-      // Handle both paginated (results array) and non-paginated (direct array) responses
-      const notesData = Array.isArray(notesRes.data) ? notesRes.data : (notesRes.data.results || []);
-      setSoapNotes(notesData);
-      setStats({
-        completedThisWeek: statsRes.data.completed_this_week || 0,
-        draftNotes: statsRes.data.draft || 0,
-        overdueNotes: statsRes.data.overdue || 0
-      });
-    } catch (error: any) {
-      console.error('Error loading SOAP notes:', error);
-      setError(error.response?.data?.detail || 'Failed to load SOAP notes');
-    } finally {
-      setLoading(false);
-    }
-  };
-  const [open, setOpen] = useState(false);
-  const [selectedNote, setSelectedNote] = useState<SOAPNote | null>(null);
-  const [patients, setPatients] = useState<any[]>([]);
-  const [soapData, setSoapData] = useState({
-    patient: '',
-    session_date: format(new Date(), 'yyyy-MM-dd'),
-    chief_complaint: '',
-    subjective: '',
-    objective: '',
-    assessment: '',
-    plan: '',
-    status: 'draft' as 'draft' | 'finalized' | 'amended'
-  });
-
-  useEffect(() => {
-    loadPatients();
-  }, []);
-
-  const loadPatients = async () => {
-    try {
-      const response = await apiClient.get('/auth/?role=client');
-      // Handle both paginated (results array) and non-paginated (direct array) responses
-      const patientsData = Array.isArray(response.data) ? response.data : (response.data.results || []);
-      setPatients(patientsData);
-    } catch (error) {
-      console.error('Error loading patients:', error);
-      setPatients([]);
-    }
-  };
-
-  const handleOpenDialog = (note: SOAPNote | null = null) => {
-    setSelectedNote(note);
-    if (note) {
-      setSoapData({
-        patient: note.patient,
-        session_date: format(new Date(note.session_date), 'yyyy-MM-dd'),
-        chief_complaint: note.chief_complaint || '',
-        subjective: note.subjective || '',
-        objective: note.objective || '',
-        assessment: note.assessment || '',
-        plan: note.plan || '',
-        status: note.status
-      });
-    } else {
-      setSoapData({ 
-        patient: '',
-        session_date: format(new Date(), 'yyyy-MM-dd'),
-        chief_complaint: '',
-        subjective: '', 
-        objective: '', 
-        assessment: '', 
-        plan: '',
-        status: 'draft'
-      });
-    }
-    setOpen(true);
-  };
-
-  const handleCloseDialog = () => {
-    setOpen(false);
-    setSelectedNote(null);
-    setError(null);
-  };
-
-  const handleSave = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (selectedNote) {
-        // Update existing note
-        await apiClient.patch(`/soap-notes/soap-notes/${selectedNote.id}/`, soapData);
-      } else {
-        // Create new note
-        await apiClient.post('/soap-notes/soap-notes/', soapData);
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [notesRes, patientsRes] = await Promise.all([
+          apiClient.get('/soap-notes/'),
+          apiClient.get('/patients/'),
+        ]);
+        const raw = notesRes.data?.results ?? notesRes.data ?? [];
+        setNotes(Array.isArray(raw) ? raw : []);
+        const pRaw = patientsRes.data?.results ?? patientsRes.data ?? [];
+        setPatients(Array.isArray(pRaw) ? pRaw : []);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to load notes';
+        setError(msg);
+      } finally {
+        setLoading(false);
       }
-      await loadSOAPNotes();
-      handleCloseDialog();
-    } catch (error: any) {
-      console.error('Error saving SOAP note:', error);
-      setError(error.response?.data?.detail || 'Failed to save SOAP note');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    void load();
+  }, []);
 
-  const handleFinalize = async (noteId: string) => {
-    if (!window.confirm('Are you sure you want to finalize this note? This action cannot be undone.')) {
-      return;
-    }
-    
-    setLoading(true);
-    setError(null);
+  // ── Debounced autosave ──
+  const debouncedFields = useDebounce(fields, 2000);
+
+  const doAutosave = useCallback(async (noteId: string, f: typeof fields) => {
+    const unchanged =
+      f.subjective === lastSaved.current.subjective &&
+      f.objective  === lastSaved.current.objective  &&
+      f.assessment === lastSaved.current.assessment &&
+      f.plan       === lastSaved.current.plan;
+    if (unchanged) return;
+    setSaveStatus('saving');
     try {
-      await apiClient.post(`/soap-notes/soap-notes/${noteId}/finalize/`);
-      await loadSOAPNotes();
-    } catch (error: any) {
-      console.error('Error finalizing SOAP note:', error);
-      setError(error.response?.data?.detail || 'Failed to finalize SOAP note');
+      const res = await apiClient.patch(`/soap-notes/${noteId}/autosave`, f);
+      setSavedAt(res.data.savedAt ?? new Date().toISOString());
+      lastSaved.current = { ...f };
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeNote || activeNote.isLocked || viewOnly) return;
+    void doAutosave(activeNote.id, debouncedFields);
+  }, [debouncedFields, activeNote, viewOnly, doAutosave]);
+
+  // ── Open editor ──
+  const openNote = async (note: SOAPNote, readOnly = false) => {
+    try {
+      const res = await apiClient.get(`/soap-notes/${note.id}`);
+      const full: SOAPNote = res.data;
+      setActiveNote(full);
+      const f = { subjective: full.subjective, objective: full.objective, assessment: full.assessment, plan: full.plan };
+      setFields(f);
+      lastSaved.current = { ...f };
+      setSaveStatus('idle');
+      setSavedAt(null);
+      setViewOnly(readOnly || full.isLocked);
+      setEditorOpen(true);
+    } catch {
+      setSnack({ open: true, msg: 'Could not load note', severity: 'error' });
+    }
+  };
+
+  const closeEditor = () => {
+    setEditorOpen(false);
+    setActiveNote(null);
+    setSaveStatus('idle');
+  };
+
+  // ── Create new note ──
+  const handleCreate = async () => {
+    if (!newPatientId) return;
+    setCreating(true);
+    try {
+      const therapistId = authState.user?.id;
+      const res = await apiClient.post('/soap-notes/', {
+        patientId: newPatientId,
+        therapistId,
+        date: new Date().toISOString(),
+      });
+      const created: SOAPNote = res.data;
+      setNotes((prev) => [created, ...prev]);
+      setNewOpen(false);
+      setNewPatientId('');
+      openNote(created);
+    } catch {
+      setSnack({ open: true, msg: 'Failed to create note', severity: 'error' });
     } finally {
-      setLoading(false);
+      setCreating(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'finalized': return 'success';
-      case 'draft': return 'warning';
-      case 'amended': return 'info';
-      default: return 'default';
+  // ── Finalize ──
+  const handleFinalize = async () => {
+    if (!activeNote) return;
+    setFinalizing(true);
+    try {
+      const res = await apiClient.post(`/soap-notes/${activeNote.id}/finalize`, { signature });
+      const finalized: SOAPNote = res.data;
+      setNotes((prev) => prev.map((n) => (n.id === finalized.id ? finalized : n)));
+      setActiveNote(finalized);
+      setViewOnly(true);
+      setFinalizeOpen(false);
+      setSnack({ open: true, msg: 'Note finalized and locked ✓', severity: 'success' });
+    } catch {
+      setSnack({ open: true, msg: 'Finalization failed', severity: 'error' });
+    } finally {
+      setFinalizing(false);
     }
   };
 
+  // ── Helpers ──
+  const patientName = (note: SOAPNote) =>
+    `${note.patient?.user?.firstName ?? ''} ${note.patient?.user?.lastName ?? ''}`.trim() || 'Unknown';
+
+  const statusChip = (note: SOAPNote) => {
+    if (note.isLocked) return <Chip label="Finalized" color="success" size="small" icon={<Lock />} />;
+    if (note.status === 'draft') return <Chip label="Draft" color="warning" size="small" />;
+    return <Chip label={note.status} size="small" />;
+  };
+
+  // ── Render ──
   return (
     <Box>
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-      
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 1.5, mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          SOAP Notes & Clinical Documentation
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-          disabled={loading}
-          fullWidth={isMobile}
-        >
-          New SOAP Note
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h5" fontWeight={700}>SOAP Notes</Typography>
+        <Button variant="contained" startIcon={<Add />} onClick={() => setNewOpen(true)}>
+          New Note
         </Button>
       </Box>
 
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={6} md={4}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Assignment color="success" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h4" color="success.main">
-                {loading ? <CircularProgress size={24} /> : stats.completedThisWeek}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Completed This Week
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={4}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Edit color="warning" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h4" color="warning.main">
-                {loading ? <CircularProgress size={24} /> : stats.draftNotes}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Draft Notes
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Schedule color="error" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h4" color="error.main">
-                {loading ? <CircularProgress size={24} /> : stats.overdueNotes}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Overdue Notes
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      {/* SOAP Notes Table */}
-      <Paper>
-        {isMobile ? (
-          <Box sx={{ p: 2, display: 'grid', gap: 1.5 }}>
-            {loading && soapNotes.length === 0 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : soapNotes.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-                No SOAP notes found. Create your first note to get started.
-              </Typography>
-            ) : (
-              soapNotes.map((note) => (
-                <Card key={note.id} variant="outlined">
-                  <CardContent>
-                    <Typography variant="subtitle2">{format(new Date(note.session_date), 'MMM dd, yyyy')}</Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>{note.patient_name}</Typography>
-                    <Typography variant="caption" color="text.secondary">{note.therapist_name}</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      {note.chief_complaint || '-'}
-                    </Typography>
-                    <Box sx={{ mt: 1 }}>
-                      <Chip
-                        label={note.status.charAt(0).toUpperCase() + note.status.slice(1)}
-                        color={getStatusColor(note.status) as any}
-                        size="small"
-                        variant="outlined"
-                      />
-                    </Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                      Updated {format(new Date(note.updated_at), 'MMM dd, yyyy HH:mm')}
-                    </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
-                      <IconButton size="small" color="primary" onClick={() => handleOpenDialog(note)} disabled={loading}>
-                        <Edit />
-                      </IconButton>
-                      <IconButton size="small" color="info" onClick={() => handleOpenDialog(note)} disabled={loading}>
-                        <Visibility />
-                      </IconButton>
-                      {note.status === 'draft' && (
-                        <IconButton size="small" color="success" onClick={() => handleFinalize(note.id)} disabled={loading} title="Finalize Note">
-                          <CheckCircle />
-                        </IconButton>
-                      )}
-                    </Box>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </Box>
-        ) : (
+      {/* Notes table */}
+      <Paper variant="outlined">
         <TableContainer>
-          <Table>
+          <Table size="small">
             <TableHead>
-              <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell>Patient</TableCell>
-                <TableCell>Therapist</TableCell>
-                <TableCell>Chief Complaint</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Last Modified</TableCell>
-                <TableCell align="center">Actions</TableCell>
+              <TableRow sx={{ backgroundColor: 'grey.50' }}>
+                <TableCell><strong>Date</strong></TableCell>
+                <TableCell><strong>Patient</strong></TableCell>
+                <TableCell><strong>Therapist</strong></TableCell>
+                <TableCell><strong>Status</strong></TableCell>
+                <TableCell align="right"><strong>Actions</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {loading && soapNotes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center">
-                    <CircularProgress sx={{ my: 4 }} />
-                  </TableCell>
-                </TableRow>
-              ) : soapNotes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center">
-                    <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
-                      No SOAP notes found. Create your first note to get started.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                soapNotes.map((note) => (
-                <TableRow key={note.id}>
-                  <TableCell>
-                    {format(new Date(note.session_date), 'MMM dd, yyyy')}
-                  </TableCell>
-                  <TableCell>{note.patient_name}</TableCell>
-                  <TableCell>{note.therapist_name}</TableCell>
-                  <TableCell>{note.chief_complaint || '-'}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={note.status.charAt(0).toUpperCase() + note.status.slice(1)}
-                      color={getStatusColor(note.status) as any}
-                      size="small"
-                      variant="outlined"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {format(new Date(note.updated_at), 'MMM dd, yyyy HH:mm')}
-                  </TableCell>
-                  <TableCell align="center">
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      onClick={() => handleOpenDialog(note)}
-                      disabled={loading}
-                    >
-                      <Edit />
-                    </IconButton>
-                    <IconButton 
-                      size="small" 
-                      color="info"
-                      onClick={() => handleOpenDialog(note)}
-                      disabled={loading}
-                    >
-                      <Visibility />
-                    </IconButton>
-                    {note.status === 'draft' && (
-                      <IconButton
-                        size="small"
-                        color="success"
-                        onClick={() => handleFinalize(note.id)}
-                        disabled={loading}
-                        title="Finalize Note"
-                      >
-                        <CheckCircle />
-                      </IconButton>
+              {loading ? (
+                <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>
+              ) : notes.length === 0 ? (
+                <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>No SOAP notes yet. Click "New Note" to get started.</TableCell></TableRow>
+              ) : notes.map((note) => (
+                <TableRow key={note.id} hover>
+                  <TableCell>{format(new Date(note.date), 'MMM d, yyyy')}</TableCell>
+                  <TableCell>{patientName(note)}</TableCell>
+                  <TableCell>{note.therapist ? `${note.therapist.firstName} ${note.therapist.lastName}` : '—'}</TableCell>
+                  <TableCell>{statusChip(note)}</TableCell>
+                  <TableCell align="right">
+                    {note.isLocked ? (
+                      <Tooltip title="View (locked)">
+                        <IconButton size="small" onClick={() => openNote(note, true)}><Visibility fontSize="small" /></IconButton>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title="Edit">
+                        <IconButton size="small" color="primary" onClick={() => openNote(note)}><Edit fontSize="small" /></IconButton>
+                      </Tooltip>
                     )}
                   </TableCell>
                 </TableRow>
-                ))
-              )}
+              ))}
             </TableBody>
           </Table>
         </TableContainer>
-        )}
       </Paper>
 
-      {/* SOAP Note Dialog */}
-      <Dialog open={open} onClose={handleCloseDialog} maxWidth="md" fullWidth>
-        <DialogTitle>
-          {selectedNote ? 'Edit SOAP Note' : 'New SOAP Note'}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            <Grid container spacing={3}>
-              {!selectedNote && (
-                <>
-                  <Grid item xs={12} md={6}>
-                    <TextField
-                      select
-                      fullWidth
-                      label="Patient"
-                      value={soapData.patient}
-                      onChange={(e) => setSoapData({ ...soapData, patient: e.target.value })}
-                      required
-                    >
-                      <MenuItem value="">Select a patient</MenuItem>
-                      {patients.map((patient) => (
-                        <MenuItem key={patient.id} value={patient.id}>
-                          {patient.first_name} {patient.last_name}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <TextField
-                      fullWidth
-                      type="date"
-                      label="Session Date"
-                      value={soapData.session_date}
-                      onChange={(e) => setSoapData({ ...soapData, session_date: e.target.value })}
-                      InputLabelProps={{ shrink: true }}
-                      required
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <TextField
-                      fullWidth
-                      label="Chief Complaint"
-                      placeholder="Brief description of the main concern..."
-                      value={soapData.chief_complaint}
-                      onChange={(e) => setSoapData({ ...soapData, chief_complaint: e.target.value })}
-                    />
-                  </Grid>
-                </>
-              )}
-              
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom color="primary">
-                  Subjective
-                </Typography>
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={4}
-                  placeholder="Patient's reported symptoms, concerns, and subjective experience..."
-                  value={soapData.subjective}
-                  onChange={(e) => setSoapData({ ...soapData, subjective: e.target.value })}
-                />
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Divider sx={{ my: 1 }} />
-                <Typography variant="h6" gutterBottom color="primary">
-                  Objective
-                </Typography>
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={4}
-                  placeholder="Observable findings, test results, mental status exam..."
-                  value={soapData.objective}
-                  onChange={(e) => setSoapData({ ...soapData, objective: e.target.value })}
-                />
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Divider sx={{ my: 1 }} />
-                <Typography variant="h6" gutterBottom color="primary">
-                  Assessment
-                </Typography>
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={4}
-                  placeholder="Clinical impression, diagnosis, progress assessment..."
-                  value={soapData.assessment}
-                  onChange={(e) => setSoapData({ ...soapData, assessment: e.target.value })}
-                />
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Divider sx={{ my: 1 }} />
-                <Typography variant="h6" gutterBottom color="primary">
-                  Plan
-                </Typography>
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={4}
-                  placeholder="Treatment plan, interventions, follow-up, homework assignments..."
-                  value={soapData.plan}
-                  onChange={(e) => setSoapData({ ...soapData, plan: e.target.value })}
-                />
-              </Grid>
-              
-              <Grid item xs={12}>
-                <TextField
-                  select
-                  fullWidth
-                  label="Status"
-                  value={soapData.status}
-                  onChange={(e) => setSoapData({ ...soapData, status: e.target.value as any })}
-                >
-                  <MenuItem value="draft">Draft</MenuItem>
-                  <MenuItem value="finalized">Finalized</MenuItem>
-                  <MenuItem value="amended">Amended</MenuItem>
-                </TextField>
-              </Grid>
-            </Grid>
+      {/* ── SOAP Editor Dialog ── */}
+      <Dialog open={editorOpen} onClose={closeEditor} maxWidth="md" fullWidth PaperProps={{ sx: { minHeight: '80vh' } }}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
+          <Box>
+            <Typography variant="h6">
+              {viewOnly ? <Lock sx={{ mr: 1, fontSize: 18, verticalAlign: 'middle', color: 'success.main' }} /> : null}
+              SOAP Note — {activeNote ? patientName(activeNote) : ''}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {activeNote ? format(new Date(activeNote.date), 'MMMM d, yyyy') : ''}
+              {activeNote?.isLocked && ' · Finalized'}
+            </Typography>
           </Box>
+          <SaveStatusBadge status={saveStatus} savedAt={savedAt} />
+        </DialogTitle>
+
+        {activeNote?.isLocked && (
+          <Alert severity="success" icon={<CheckCircle />} sx={{ mx: 3, mb: 1 }}>
+            This note has been finalized and signed. It is read-only.
+            {activeNote.signature && ` Signed by: ${activeNote.signature}`}
+          </Alert>
+        )}
+        {activeNote?._hasDraft && !activeNote.isLocked && (
+          <Alert severity="info" sx={{ mx: 3, mb: 1 }}>
+            Draft restored from your last session.
+          </Alert>
+        )}
+
+        <DialogContent dividers sx={{ p: 3 }}>
+          <Grid container spacing={2}>
+            {(['subjective', 'objective', 'assessment', 'plan'] as const).map((field) => (
+              <Grid item xs={12} sm={6} key={field}>
+                <TextField
+                  label={field.charAt(0).toUpperCase() + field.slice(1)}
+                  multiline
+                  rows={8}
+                  fullWidth
+                  disabled={viewOnly}
+                  value={fields[field]}
+                  onChange={(e) => setFields((prev) => ({ ...prev, [field]: e.target.value }))}
+                  placeholder={
+                    field === 'subjective' ? "Patient's own words, chief complaint, history…" :
+                    field === 'objective'  ? "Measurable observations, vitals, test results…" :
+                    field === 'assessment' ? "Clinical diagnosis, clinical impressions…" :
+                                            "Treatment plan, goals, next steps…"
+                  }
+                  InputProps={{ readOnly: viewOnly }}
+                  sx={{ '& .MuiInputBase-root': { fontFamily: 'monospace', fontSize: '0.875rem' } }}
+                />
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, py: 2, justifyContent: 'space-between' }}>
+          <Button onClick={closeEditor} startIcon={<Cancel />} color="inherit">Close</Button>
+          {!viewOnly && (
+            <Button
+              variant="contained"
+              color="success"
+              startIcon={<CheckCircle />}
+              onClick={() => {
+                setSignature(`${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim());
+                setFinalizeOpen(true);
+              }}
+            >
+              Finalize &amp; Sign
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Finalize Confirmation ── */}
+      <Dialog open={finalizeOpen} onClose={() => !finalizing && setFinalizeOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Finalize &amp; Sign Note?</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Once finalized this note will be <strong>permanently locked</strong> and cannot be edited. This action cannot be undone.
+          </Alert>
+          <TextField
+            label="Signature (your name)"
+            fullWidth
+            value={signature}
+            onChange={(e) => setSignature(e.target.value)}
+            size="small"
+          />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog} startIcon={<Cancel />} disabled={loading}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleSave} 
-            variant="contained" 
-            startIcon={loading ? <CircularProgress size={20} /> : <Save />}
-            disabled={loading || !soapData.patient}
-          >
-            {loading ? 'Saving...' : 'Save Note'}
+          <Button onClick={() => setFinalizeOpen(false)} disabled={finalizing}>Cancel</Button>
+          <Button variant="contained" color="success" onClick={handleFinalize} disabled={finalizing || !signature.trim()}>
+            {finalizing ? <CircularProgress size={20} /> : 'Confirm & Lock'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── New Note Dialog ── */}
+      <Dialog open={newOpen} onClose={() => !creating && setNewOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>New SOAP Note</DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <FormControl fullWidth size="small">
+            <InputLabel>Select Patient</InputLabel>
+            <Select value={newPatientId} label="Select Patient" onChange={(e) => setNewPatientId(e.target.value)}>
+              {patients.map((p) => (
+                <MenuItem key={p.id} value={p.id}>
+                  {`${p.user?.firstName ?? ''} ${p.user?.lastName ?? ''}`.trim() || p.id}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNewOpen(false)} disabled={creating}>Cancel</Button>
+          <Button variant="contained" onClick={handleCreate} disabled={!newPatientId || creating}>
+            {creating ? <CircularProgress size={20} /> : 'Create Note'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Snackbar ── */}
+      <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={snack.severity} onClose={() => setSnack((s) => ({ ...s, open: false }))}>
+          {snack.msg}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
 
 export default SOAPNotes;
+

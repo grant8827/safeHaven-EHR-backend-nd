@@ -48,7 +48,8 @@ import {
   CheckCircleOutline,
   Person,
   Phone,
-  MedicalServices
+  MedicalServices,
+  AssignmentInd,
 } from '@mui/icons-material';
 import axios from 'axios';
 import { apiClient } from '../../services/apiClient';
@@ -149,6 +150,11 @@ const PatientManagement: React.FC = () => {
   const [removePatientOpen, setRemovePatientOpen] = useState(false);
   const [completePatientOpen, setCompletePatientOpen] = useState(false);
   const [therapists, setTherapists] = useState<Array<{ id: string; name: string }>>([]);
+
+  // Assign therapist feature
+  const [assignTherapistOpen, setAssignTherapistOpen] = useState(false);
+  const [selectedTherapistId, setSelectedTherapistId] = useState<string>('');
+  const [assigningTherapist, setAssigningTherapist] = useState(false);
   const [editPatientData, setEditPatientData] = useState({
     name: '',
     email: '',
@@ -248,6 +254,38 @@ const PatientManagement: React.FC = () => {
   const handleOpenRemovePatient = () => {
     setRemovePatientOpen(true);
     handleCloseActions();
+  };
+
+  const handleOpenAssignTherapist = () => {
+    if (!actionPatient) return;
+    setSelectedTherapistId('');
+    setAssignTherapistOpen(true);
+    handleCloseActions();
+  };
+
+  const handleSaveAssignTherapist = async () => {
+    if (!actionPatient) return;
+    try {
+      setAssigningTherapist(true);
+      await apiClient.patch(`/api/patients/${actionPatient.id}/`, {
+        assignedTherapistId: selectedTherapistId || null,
+      });
+      const therapistName = therapists.find((t) => t.id === selectedTherapistId)?.name;
+      setSnackbar({
+        open: true,
+        message: therapistName
+          ? `Therapist "${therapistName}" assigned to ${actionPatient.name}`
+          : `Therapist removed from ${actionPatient.name}`,
+        severity: 'success',
+      });
+      await loadPatients();
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to assign therapist', severity: 'error' });
+    } finally {
+      setAssigningTherapist(false);
+      setAssignTherapistOpen(false);
+      setActionPatient(null);
+    }
   };
 
   const handleRemovePatient = async () => {
@@ -615,6 +653,12 @@ const PatientManagement: React.FC = () => {
           </ListItemIcon>
           <ListItemText>Edit Patient</ListItemText>
         </MenuItem>
+        <MenuItem onClick={handleOpenAssignTherapist}>
+          <ListItemIcon>
+            <AssignmentInd fontSize="small" color="primary" />
+          </ListItemIcon>
+          <ListItemText>Assign Therapist</ListItemText>
+        </MenuItem>
         <MenuItem onClick={handleOpenCompletePatient}>
           <ListItemIcon>
             <CheckCircleOutline fontSize="small" />
@@ -628,6 +672,44 @@ const PatientManagement: React.FC = () => {
           <ListItemText>Remove Patient</ListItemText>
         </MenuItem>
       </Menu>
+
+      {/* Assign Therapist Dialog */}
+      <Dialog
+        open={assignTherapistOpen}
+        onClose={() => setAssignTherapistOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Assign Therapist — {actionPatient?.name}</DialogTitle>
+        <DialogContent dividers>
+          <FormControl fullWidth>
+            <InputLabel>Select Therapist</InputLabel>
+            <Select
+              value={selectedTherapistId}
+              label="Select Therapist"
+              onChange={(e) => setSelectedTherapistId(e.target.value)}
+            >
+              <MenuItem value=""><em>None (remove assignment)</em></MenuItem>
+              {therapists.map((therapist) => (
+                <MenuItem key={therapist.id} value={therapist.id}>
+                  {therapist.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAssignTherapistOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleSaveAssignTherapist()}
+            disabled={assigningTherapist}
+            startIcon={assigningTherapist ? <CircularProgress size={16} /> : <AssignmentInd />}
+          >
+            {assigningTherapist ? 'Saving...' : 'Assign'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Patient Details Dialog */}
       <Dialog
