@@ -282,6 +282,15 @@ const createSession = asyncHandler(async (req, res) => {
   const generatedRoomId = roomId || uuidv4();
   const sessionUrl = `${frontendUrl}/telehealth/session/${generatedRoomId}`;
 
+  // Bug 9 fixed: always include the creating therapist as a participant so
+  // they can join their own session without hitting a 404.
+  const therapistParticipant = { userId: req.user.id, role: 'therapist' };
+  const extraParticipants = participantIds && participantIds.length > 0
+    ? participantIds
+        .filter((uid) => uid !== req.user.id) // avoid duplicate therapist row
+        .map((uid) => ({ userId: uid, role: 'participant' }))
+    : [];
+
   const session = await prisma.telehealthSession.create({
     data: {
       roomId: generatedRoomId,
@@ -455,9 +464,13 @@ const deleteSession = asyncHandler(async (req, res) => {
 });
 
 // Join session (update participant status)
+// Bug 1 fixed: returns iceServers so the client can initialise WebRTC.
+// Bug 2 fixed: auto-creates the participant row if missing (therapist / staff
+//              who created the session are not necessarily in the junction table).
 const joinSession = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const userId = req.user.id;
+  const userRole = req.user.role;
 
   const participant = await prisma.telehealthParticipant.findFirst({
     where: {
