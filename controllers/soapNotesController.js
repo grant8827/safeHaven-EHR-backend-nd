@@ -40,10 +40,12 @@ const getSoapNotes = asyncHandler(async (req, res) => {
   if (patientId) where.patientId = patientId;
   if (appointmentId) where.appointmentId = appointmentId;
   if (status) where.status = status;
-  // Non-admins can only see their own notes
-  if (req.user.role !== 'admin') {
+  // Admins and staff can see all notes (optionally filtered by therapistId query param)
+  // Therapists can only see their own notes
+  if (req.user.role === 'therapist') {
     where.therapistId = req.user.id;
   } else if (therapistId) {
+    // admin or staff passed an explicit filter
     where.therapistId = therapistId;
   }
 
