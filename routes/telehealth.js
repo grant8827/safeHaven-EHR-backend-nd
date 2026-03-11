@@ -20,8 +20,9 @@ router.put('/sessions/:id', requireRole('admin', 'therapist', 'staff'), teleheal
 router.delete('/sessions/:id', requireRole('admin'), telehealthController.deleteSession);
 
 // Session actions
-router.post('/sessions/:id/start', requireRole('admin', 'therapist'), telehealthController.startSession);
-router.post('/sessions/:id/end', requireRole('admin', 'therapist'), telehealthController.endSession);
+router.post('/sessions/:id/start', requireRole('admin', 'therapist', 'staff'), telehealthController.startSession);
+router.post('/sessions/:id/end', requireRole('admin', 'therapist', 'staff'), telehealthController.endSession);
+router.post('/sessions/:id/cancel', requireRole('admin', 'therapist', 'staff'), telehealthController.cancelSession);
 router.post('/sessions/:id/join', telehealthController.joinSession);
 router.post('/sessions/:id/leave', telehealthController.leaveSession);
 

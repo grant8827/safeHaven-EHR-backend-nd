@@ -2,6 +2,7 @@ const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { v4: uuidv4 } = require('uuid');
 const { presenceHelpers, telehealthSessionHelpers, redisClient } = require('../utils/redis');
+const { sendEmergencySessionEmail } = require('../utils/emailService');
 
 // Get telehealth sessions
 const getSessions = asyncHandler(async (req, res) => {
@@ -466,6 +467,27 @@ const deleteSession = asyncHandler(async (req, res) => {
   return res.status(204).send();
 });
 
+// Cancel a session (sets status to 'cancelled' — available to admin, therapist, staff)
+const cancelSession = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const session = await prisma.telehealthSession.findUnique({ where: { id } });
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  if (['ended', 'cancelled'].includes(session.status)) {
+    return res.status(400).json({ error: `Session is already ${session.status}` });
+  }
+
+  const updated = await prisma.telehealthSession.update({
+    where: { id },
+    data: { status: 'cancelled', endedAt: new Date() },
+  });
+
+  return res.json({ success: true, session: updated });
+});
+
 // Join session — auto-creates participant row if missing (e.g. therapist who created session),
 // stamps joinedAt, and returns ICE server config so the client can initialise WebRTC.
 const joinSession = asyncHandler(async (req, res) => {
@@ -675,7 +697,7 @@ const createEmergencySession = asyncHandler(async (req, res) => {
   // Create session with room ID
   const roomId = `emergency-${uuidv4()}`;
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  const sessionUrl = `${frontendUrl}/telehealth/session/${roomId}`;
+  // URL uses session DB id (set after create) — built below after creation
 
   const session = await prisma.telehealthSession.create({
     data: {
@@ -725,6 +747,23 @@ const createEmergencySession = asyncHandler(async (req, res) => {
       },
     },
   });
+
+  // Build session URL using the DB id so VideoSession can look it up correctly
+  const sessionUrl = `${frontendUrl}/telehealth/session/${session.id}`;
+  await prisma.telehealthSession.update({
+    where: { id: session.id },
+    data: { sessionUrl },
+  });
+
+  // Send emergency invite email to patient (non-blocking — log error but don't fail the request)
+  const patientUser = patient.user;
+  sendEmergencySessionEmail({
+    email: patientUser.email,
+    firstName: patientUser.firstName,
+    lastName: patientUser.lastName,
+    roomId,
+    sessionUrl,
+  }).catch((err) => console.error('[Telehealth] Emergency email failed:', err));
 
   return res.status(201).json({
     session,
@@ -856,6 +895,7 @@ module.exports = {
   getSessionByAppointmentId,
   createSession,
   createEmergencySession,
+  cancelSession,
   startSession,
   endSession,
   updateSession,
