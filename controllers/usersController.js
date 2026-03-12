@@ -181,6 +181,25 @@ const deleteUser = asyncHandler(async (req, res) => {
 
 // Get therapists (for appointment scheduling - accessible to all authenticated users)
 const getTherapists = asyncHandler(async (req, res) => {
+  // Privacy: client can only see their assigned therapist
+  if (req.user.role === 'client') {
+    const patient = await prisma.patient.findFirst({
+      where: { userId: req.user.id },
+      include: {
+        assignedTherapist: {
+          select: { id: true, username: true, email: true, role: true, firstName: true, lastName: true, isActive: true },
+        },
+      },
+    });
+    const results = (patient?.assignedTherapist && patient.assignedTherapist.isActive)
+      ? [patient.assignedTherapist]
+      : [];
+    return res.json({
+      results: results.map((u) => req.path.includes('/v1/') ? toCamelUser(u) : toSnakeUser(u)),
+      count: results.length,
+    });
+  }
+
   const therapists = await prisma.user.findMany({
     where: {
       role: 'therapist',

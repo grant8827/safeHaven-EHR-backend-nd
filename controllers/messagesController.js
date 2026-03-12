@@ -2,6 +2,127 @@ const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { chatHelpers } = require('../utils/redis');
 
+// ── Helper: returns a Set of user IDs the given user is allowed to message ──
+const getAllowedRecipientIds = async (user) => {
+  const { role, id: userId } = user;
+
+  if (role === 'admin' || role === 'staff') {
+    // Admin/staff can message anyone
+    const users = await prisma.user.findMany({
+      where: { isActive: true, id: { not: userId } },
+      select: { id: true },
+    });
+    return new Set(users.map((u) => u.id));
+  }
+
+  if (role === 'therapist') {
+    // Therapist can message their assigned patients + admin/staff
+    const [patients, adminStaff] = await Promise.all([
+      prisma.patient.findMany({
+        where: { assignedTherapistId: userId },
+        include: { user: { select: { id: true, isActive: true } } },
+      }),
+      prisma.user.findMany({
+        where: { role: { in: ['admin', 'staff'] }, isActive: true },
+        select: { id: true },
+      }),
+    ]);
+    const ids = new Set([
+      ...patients.filter((p) => p.user.isActive).map((p) => p.user.id),
+      ...adminStaff.map((u) => u.id),
+    ]);
+    return ids;
+  }
+
+  if (role === 'client') {
+    // Client can message their assigned therapist + admin/staff
+    const [patient, adminStaff] = await Promise.all([
+      prisma.patient.findFirst({
+        where: { userId },
+        include: { assignedTherapist: { select: { id: true, isActive: true } } },
+      }),
+      prisma.user.findMany({
+        where: { role: { in: ['admin', 'staff'] }, isActive: true },
+        select: { id: true },
+      }),
+    ]);
+    const ids = new Set(adminStaff.map((u) => u.id));
+    if (patient?.assignedTherapist?.isActive) {
+      ids.add(patient.assignedTherapist.id);
+    }
+    return ids;
+  }
+
+  return new Set();
+};
+
+// Get allowed recipients for compose dialog
+const getRecipients = asyncHandler(async (req, res) => {
+  const { role, id: userId } = req.user;
+
+  if (role === 'admin' || role === 'staff') {
+    const users = await prisma.user.findMany({
+      where: { isActive: true, id: { not: userId } },
+      select: { id: true, firstName: true, lastName: true, role: true },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+    return res.json({
+      results: users.map((u) => ({
+        id: u.id,
+        full_name: `${u.firstName} ${u.lastName}`.trim(),
+        role: u.role,
+      })),
+    });
+  }
+
+  if (role === 'therapist') {
+    const [assignedPatients, adminStaff] = await Promise.all([
+      prisma.patient.findMany({
+        where: { assignedTherapistId: userId },
+        include: { user: { select: { id: true, firstName: true, lastName: true, role: true, isActive: true } } },
+      }),
+      prisma.user.findMany({
+        where: { role: { in: ['admin', 'staff'] }, isActive: true },
+        select: { id: true, firstName: true, lastName: true, role: true },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      }),
+    ]);
+    const results = [
+      ...assignedPatients
+        .filter((p) => p.user.isActive)
+        .map((p) => ({ id: p.user.id, full_name: `${p.user.firstName} ${p.user.lastName}`.trim(), role: p.user.role }))
+        .sort((a, b) => a.full_name.localeCompare(b.full_name)),
+      ...adminStaff.map((u) => ({ id: u.id, full_name: `${u.firstName} ${u.lastName}`.trim(), role: u.role })),
+    ];
+    return res.json({ results });
+  }
+
+  if (role === 'client') {
+    const [patient, adminStaff] = await Promise.all([
+      prisma.patient.findFirst({
+        where: { userId },
+        include: {
+          assignedTherapist: { select: { id: true, firstName: true, lastName: true, role: true, isActive: true } },
+        },
+      }),
+      prisma.user.findMany({
+        where: { role: { in: ['admin', 'staff'] }, isActive: true },
+        select: { id: true, firstName: true, lastName: true, role: true },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      }),
+    ]);
+    const results = [];
+    if (patient?.assignedTherapist?.isActive) {
+      const t = patient.assignedTherapist;
+      results.push({ id: t.id, full_name: `${t.firstName} ${t.lastName}`.trim(), role: t.role });
+    }
+    adminStaff.forEach((u) => results.push({ id: u.id, full_name: `${u.firstName} ${u.lastName}`.trim(), role: u.role }));
+    return res.json({ results });
+  }
+
+  return res.json({ results: [] });
+});
+
 // Get message threads for a user
 const getThreads = asyncHandler(async (req, res) => {
   const { page = 1, limit = 20 } = req.query;
@@ -148,6 +269,16 @@ const createThread = asyncHandler(async (req, res) => {
   // Deduplicate: always include creator
   const allIds = Array.from(new Set([userId, ...(Array.isArray(participantIds) ? participantIds : [])]));
 
+  // Privacy: validate that requested recipients are allowed
+  const requestedOtherIds = allIds.filter((id) => id !== userId);
+  if (requestedOtherIds.length > 0) {
+    const allowedIds = await getAllowedRecipientIds(req.user);
+    const forbidden = requestedOtherIds.filter((id) => !allowedIds.has(id));
+    if (forbidden.length > 0) {
+      return res.status(403).json({ error: 'You are not permitted to message one or more of these recipients' });
+    }
+  }
+
   const thread = await prisma.$transaction(async (tx) => {
     const t = await tx.messageThread.create({
       data: { subject: subject.trim() },
@@ -262,6 +393,13 @@ const sendMessage = asyncHandler(async (req, res) => {
     }
 
     const allParticipantIds = Array.from(new Set([userId, ...recipient_ids]));
+
+    // Privacy: validate recipients
+    const allowedIds = await getAllowedRecipientIds(req.user);
+    const forbidden = recipient_ids.filter((id) => !allowedIds.has(id));
+    if (forbidden.length > 0) {
+      return res.status(403).json({ error: 'You are not permitted to message one or more of these recipients' });
+    }
 
     // For 1-to-1 conversations, look for an existing thread between exactly these two users
     if (allParticipantIds.length === 2) {
@@ -479,4 +617,5 @@ module.exports = {
   markAsRead,
   toggleStar,
   deleteMessage,
+  getRecipients,
 };

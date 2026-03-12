@@ -6,6 +6,9 @@ const messagesController = require('../controllers/messagesController');
 // All routes require authentication
 router.use(authenticate);
 
+// Allowed recipients for compose dialog (role-filtered)
+router.get('/recipients', messagesController.getRecipients);
+
 // Message threads
 router.get('/threads', messagesController.getThreads);
 router.post('/threads', messagesController.createThread);

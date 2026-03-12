@@ -42,6 +42,16 @@ const getPatients = asyncHandler(async (req, res) => {
 
   const where = {};
 
+  // Privacy: therapist only sees patients assigned to them
+  if (req.user.role === 'therapist') {
+    where.assignedTherapistId = req.user.id;
+  }
+
+  // Privacy: client only sees their own record
+  if (req.user.role === 'client') {
+    where.userId = req.user.id;
+  }
+
   if (search) {
     where.OR = [
       { user: { firstName: { contains: search, mode: 'insensitive' } } },
@@ -135,6 +145,16 @@ const getPatient = asyncHandler(async (req, res) => {
 
   if (!patient) {
     return res.status(404).json({ error: 'Patient not found' });
+  }
+
+  // Privacy: therapist can only view their assigned patient
+  if (req.user.role === 'therapist' && patient.assignedTherapistId !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Privacy: client can only view their own record
+  if (req.user.role === 'client' && patient.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
   }
 
   // Transform patient to snake_case with flattened user fields
@@ -319,6 +339,14 @@ const createPatient = asyncHandler(async (req, res) => {
 // Update patient
 const updatePatient = asyncHandler(async (req, res) => {
   const { id } = req.params;
+
+  // Privacy: therapist can only update their assigned patient
+  if (req.user.role === 'therapist') {
+    const existing = await prisma.patient.findUnique({ where: { id }, select: { assignedTherapistId: true } });
+    if (!existing) return res.status(404).json({ error: 'Patient not found' });
+    if (existing.assignedTherapistId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  }
+
   const {
     dateOfBirth,
     gender,
