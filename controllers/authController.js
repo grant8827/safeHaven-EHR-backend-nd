@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { toSnakeUser, toCamelUser } = require('../utils/transformers');
-const { sendPatientWelcomeEmail } = require('../utils/emailService');
+const { sendPatientWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService');
 const { tokenHelpers } = require('../utils/redis');
 const {
   signAccessToken,
@@ -196,8 +196,13 @@ const requestPasswordReset = asyncHandler(async (req, res) => {
       },
     });
 
-    // TODO: Send email with reset link
-    console.log(`Password reset token for ${email}: ${token}`);
+    const frontendUrl = process.env.FRONTEND_URL ||
+      (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').find(u => u.trim().startsWith('https://'))?.trim() : null) ||
+      'http://localhost:5173';
+    const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
+    sendPasswordResetEmail({ email: user.email, firstName: user.firstName, resetUrl }).catch((err) =>
+      console.error('Password reset email error:', err)
+    );
   }
 
   // Always return success to prevent email enumeration

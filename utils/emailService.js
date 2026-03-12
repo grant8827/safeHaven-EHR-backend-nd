@@ -319,6 +319,68 @@ Safe Haven EHR Team
   }
 };
 
+// Send password reset email
+const sendPasswordResetEmail = async ({ email, firstName, resetUrl }) => {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: process.env.DEFAULT_FROM_EMAIL,
+      to: email,
+      subject: 'Reset Your Safe Haven EHR Password',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; padding: 14px 28px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; font-size: 16px; font-weight: bold; }
+            .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 20px 0; border-radius: 0 4px 4px 0; }
+            .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Password Reset Request</h1>
+            </div>
+            <div class="content">
+              <h2>Hello ${firstName},</h2>
+              <p>We received a request to reset your Safe Haven EHR account password.</p>
+              <p>Click the button below to create a new password:</p>
+              <center>
+                <a href="${resetUrl}" class="button">Reset My Password</a>
+              </center>
+              <div class="warning">
+                <strong>⏰ This link expires in 1 hour.</strong><br>
+                If you did not request a password reset, you can safely ignore this email — your password will not change.
+              </div>
+              <p>If the button doesn't work, copy and paste this link into your browser:</p>
+              <p style="word-break: break-all; font-size: 13px; color: #555;">${resetUrl}</p>
+              <p>Best regards,<br>Safe Haven EHR Team</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated message. Please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Hello ${firstName},\n\nWe received a request to reset your Safe Haven EHR password.\n\nReset your password here (link expires in 1 hour):\n${resetUrl}\n\nIf you did not request this, ignore this email — your password will not change.\n\nBest regards,\nSafe Haven EHR Team`,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Password reset email sent to', email, ':', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('❌ Failed to send password reset email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Test email configuration
 const testEmailConnection = async () => {
   try {
@@ -336,5 +398,6 @@ module.exports = {
   sendPatientWelcomeEmail,
   sendAppointmentConfirmationEmail,
   sendEmergencySessionEmail,
+  sendPasswordResetEmail,
   testEmailConnection,
 };
