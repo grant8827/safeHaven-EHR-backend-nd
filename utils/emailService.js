@@ -352,7 +352,7 @@ const sendPasswordResetEmail = async ({ email, firstName, resetUrl }) => {
               <p>We received a request to reset your Safe Haven EHR account password.</p>
               <p>Click the button below to create a new password:</p>
               <center>
-                <a href="${resetUrl}" class="button">Reset My Password</a>
+                <a href="${resetUrl}" class="button" style="color: white !important; text-decoration: none;">Reset My Password</a>
               </center>
               <div class="warning">
                 <strong>⏰ This link expires in 1 hour.</strong><br>
