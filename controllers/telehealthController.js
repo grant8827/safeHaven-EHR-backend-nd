@@ -646,24 +646,97 @@ const saveRecording = asyncHandler(async (req, res) => {
   return res.status(201).json(recording);
 });
 
-// Save transcript
+// Save transcript (entries = [{ speakerName, speakerRole, text, timestamp }])
 const saveTranscript = asyncHandler(async (req, res) => {
-  const { sessionId, content, speakerId, timestamp } = req.body;
+  const { sessionId, entries } = req.body;
 
-  if (!sessionId || !content) {
-    return res.status(400).json({ error: 'sessionId and content are required' });
+  if (!sessionId || !Array.isArray(entries) || entries.length === 0) {
+    return res.status(400).json({ error: 'sessionId and entries array are required' });
+  }
+
+  // Validate session exists and belongs to this user
+  const session = await prisma.telehealthSession.findUnique({ where: { id: sessionId } });
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
   }
 
   const transcript = await prisma.transcript.create({
     data: {
       sessionId,
-      content,
-      speakerId,
-      timestamp: timestamp ? parseFloat(timestamp) : 0,
+      content: JSON.stringify(entries),
+      isEncrypted: false,
     },
   });
 
+  // Mark session as having a transcript
+  await prisma.telehealthSession.update({
+    where: { id: sessionId },
+    data: { updatedAt: new Date() },
+  });
+
   return res.status(201).json(transcript);
+});
+
+// List transcripts with session / patient / therapist info
+const getTranscripts = asyncHandler(async (req, res) => {
+  const { sessionId } = req.query;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  const where = {};
+  if (sessionId) where.sessionId = sessionId;
+
+  // Scope by role
+  if (userRole === 'therapist') {
+    where.session = { therapistId: userId };
+  } else if (userRole === 'client') {
+    const patientRecord = await prisma.patient.findFirst({ where: { userId } });
+    if (!patientRecord) return res.json([]);
+    where.session = { patientId: patientRecord.id };
+  }
+  // admin / staff see all
+
+  const records = await prisma.transcript.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    include: {
+      session: {
+        include: {
+          patient: {
+            include: {
+              user: { select: { firstName: true, lastName: true } },
+            },
+          },
+          therapistUser: { select: { firstName: true, lastName: true } },
+          appointment: { select: { title: true, scheduledAt: true } },
+        },
+      },
+    },
+  });
+
+  const results = records.map((t) => {
+    const s = t.session;
+    const patientUser = s.patient?.user;
+    const therapistUser = s.therapistUser;
+    let entriesParsed = [];
+    try { entriesParsed = JSON.parse(t.content); } catch { entriesParsed = []; }
+    return {
+      id: t.id,
+      session: s.id,
+      session_title: s.appointment?.title || `Session ${s.id.substring(0, 8)}`,
+      session_time: s.startedAt || s.createdAt,
+      patient_name: patientUser
+        ? `${patientUser.firstName || ''} ${patientUser.lastName || ''}`.trim()
+        : 'Unknown Patient',
+      therapist_name: therapistUser
+        ? `${therapistUser.firstName || ''} ${therapistUser.lastName || ''}`.trim()
+        : 'Unknown Therapist',
+      entries: entriesParsed,
+      created_at: t.createdAt,
+    };
+  });
+
+  return res.json(results);
 });
 
 // Create emergency session
@@ -904,6 +977,7 @@ module.exports = {
   leaveSession,
   saveRecording,
   saveTranscript,
+  getTranscripts,
   getUserPresence,
   getBatchPresence,
   getRoomMeta,
