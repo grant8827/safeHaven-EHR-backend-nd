@@ -708,7 +708,6 @@ const getTranscripts = asyncHandler(async (req, res) => {
             },
           },
           therapistUser: { select: { firstName: true, lastName: true } },
-          appointment: { select: { title: true, scheduledAt: true } },
         },
       },
     },
@@ -723,7 +722,7 @@ const getTranscripts = asyncHandler(async (req, res) => {
     return {
       id: t.id,
       session: s.id,
-      session_title: s.appointment?.title || `Session ${s.id.substring(0, 8)}`,
+      session_title: `Session ${s.id.substring(0, 8)}`,
       session_time: s.startedAt || s.createdAt,
       patient_name: patientUser
         ? `${patientUser.firstName || ''} ${patientUser.lastName || ''}`.trim()
