@@ -365,6 +365,7 @@ const updatePatient = asyncHandler(async (req, res) => {
     allergies,
     currentMedications,
     assignedTherapistId,
+    status,
   } = req.body;
 
   const updateData = {};
@@ -386,6 +387,7 @@ const updatePatient = asyncHandler(async (req, res) => {
   if (allergies !== undefined) updateData.allergies = allergies;
   if (currentMedications !== undefined) updateData.currentMedications = currentMedications;
   if (assignedTherapistId !== undefined) updateData.assignedTherapistId = assignedTherapistId;
+  if (status !== undefined) updateData.isActive = status === 'active';
 
   const patient = await prisma.patient.update({
     where: { id },

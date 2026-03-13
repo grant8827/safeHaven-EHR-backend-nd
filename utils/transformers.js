@@ -102,6 +102,9 @@ const toSnakePatient = (patient) => {
       ? `${patient.assignedTherapist.firstName} ${patient.assignedTherapist.lastName}`
       : null,
     
+    // Active status
+    is_active: patient.isActive,
+
     // Timestamps
     admission_date: patient.createdAt,
     created_at: patient.createdAt,
