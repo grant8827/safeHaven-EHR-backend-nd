@@ -22,6 +22,9 @@ router.get('/:id', appointmentsController.getAppointment);
 router.patch('/:id', requireRole('admin', 'therapist', 'staff'), appointmentsController.updateAppointment);
 router.put('/:id', requireRole('admin', 'therapist', 'staff'), appointmentsController.updateAppointment);
 
+// Confirm appointment (patients and staff can confirm)
+router.post('/:id/confirm', requireRole('admin', 'therapist', 'staff', 'client'), appointmentsController.confirmAppointment);
+
 // Cancel appointment
 router.post('/:id/cancel', requireRole('admin', 'therapist', 'staff', 'client'), appointmentsController.cancelAppointment);
 

@@ -443,6 +443,65 @@ const markNoShow = asyncHandler(async (req, res) => {
   return res.json(toSnakeAppointment(appointment));
 });
 
+// Confirm appointment (patient confirms their own, or staff confirms on their behalf)
+const confirmAppointment = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const user = req.user;
+
+  // Find appointment first to verify ownership when patient is confirming
+  const existingAppointment = await prisma.appointment.findUnique({
+    where: { id },
+    include: {
+      patient: {
+        include: {
+          user: { select: { id: true } },
+        },
+      },
+    },
+  });
+
+  if (!existingAppointment) {
+    return res.status(404).json({ error: 'Appointment not found' });
+  }
+
+  // Clients may only confirm their own appointment
+  if (user.role === 'client') {
+    const patientUserId = existingAppointment.patient?.user?.id;
+    if (patientUserId !== user.id) {
+      return res.status(403).json({ error: 'Not authorized to confirm this appointment' });
+    }
+  }
+
+  const appointment = await prisma.appointment.update({
+    where: { id },
+    data: { status: 'confirmed' },
+    include: {
+      patient: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      },
+      therapist: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  return res.json(toSnakeAppointment(appointment));
+});
+
 // Get appointment types (from enum)
 const getAppointmentTypes = asyncHandler(async (req, res) => {
   // Return the appointment types from the Prisma schema enum
@@ -466,5 +525,6 @@ module.exports = {
   deleteAppointment,
   cancelAppointment,
   markNoShow,
+  confirmAppointment,
   getAppointmentTypes,
 };
