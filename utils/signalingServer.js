@@ -194,8 +194,28 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
       await presenceHelpers.refreshPresence(userId);
     });
 
+    // ----------------------------------------------------------------    // start-transcription – therapist signals all participants to start
     // ----------------------------------------------------------------
-    // leave-room – explicit graceful leave
+    socket.on('start-transcription', ({ roomId: room }) => {
+      const dest = room || socket.roomId;
+      if (dest) {
+        socket.to(dest).emit('start-transcription', { initiatedBy: userId });
+        console.log(`[Signaling] start-transcription broadcast in room ${dest}`);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // stop-transcription – therapist signals all participants to stop
+    // ----------------------------------------------------------------
+    socket.on('stop-transcription', ({ roomId: room }) => {
+      const dest = room || socket.roomId;
+      if (dest) {
+        socket.to(dest).emit('stop-transcription', { initiatedBy: userId });
+        console.log(`[Signaling] stop-transcription broadcast in room ${dest}`);
+      }
+    });
+
+    // ----------------------------------------------------------------    // leave-room – explicit graceful leave
     // ----------------------------------------------------------------
     socket.on('leave-room', async ({ roomId: room }) => {
       await handleLeave(socket, io, room, userId, displayName);
