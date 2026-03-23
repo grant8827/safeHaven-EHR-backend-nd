@@ -13,12 +13,12 @@ const createAuditLogs = asyncHandler(async (req, res) => {
     data: logs.map((log) => ({
       userId: log.userId || req.user?.id,
       action: log.action,
-      entityType: log.entityType,
-      entityId: log.entityId,
+      resource: log.resource || log.entityType || 'unknown',
+      resourceId: log.resourceId || log.entityId || 'unknown',
       oldValues: log.oldValues || null,
       newValues: log.newValues || null,
-      ipAddress: log.ipAddress || req.ip,
-      userAgent: log.userAgent || req.get('user-agent'),
+      ipAddress: log.ipAddress || req.ip || 'unknown',
+      userAgent: log.userAgent || req.get('user-agent') || 'unknown',
     })),
   });
 
