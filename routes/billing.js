@@ -18,6 +18,9 @@ router.put('/invoices/:id', requireRole('admin', 'staff'), billingController.upd
 router.delete('/invoices/:id', requireRole('admin'), billingController.deleteInvoice);
 router.post('/invoices/:id/payment', requireRole('admin', 'staff', 'client'), billingController.addPayment);
 
+// PayPal-verified payment: verifies the order with PayPal's API before recording
+router.post('/invoices/:id/verify-paypal-payment', requireRole('admin', 'staff', 'client'), billingController.verifyPayPalPayment);
+
 // Claims
 router.get('/claims', requireRole('admin', 'staff'), billingController.getClaims);
 router.post('/claims', requireRole('admin', 'staff'), billingController.createClaim);

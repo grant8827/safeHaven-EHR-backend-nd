@@ -1,6 +1,7 @@
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { redisClient } = require('../utils/redis');
+const paypal = require('../utils/paypal');
 
 // Redis billing helpers – Hash keyed billing:patient:{id} for sub-100ms HGETALL reads
 const billingHelpers = {
@@ -585,6 +586,75 @@ const getBillingSummary = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * POST /api/billing/invoices/:id/verify-paypal-payment
+ *
+ * Verifies a PayPal order with PayPal's REST API before recording the payment.
+ * This prevents clients from faking a successful payment on the frontend.
+ *
+ * Body: { orderId: string, amount: number|string, paymentMethod: string }
+ */
+const verifyPayPalPayment = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { orderId, amount, paymentMethod } = req.body;
+
+  if (!orderId) {
+    return res.status(400).json({ error: 'orderId is required' });
+  }
+  if (!amount) {
+    return res.status(400).json({ error: 'amount is required' });
+  }
+
+  // Fetch the invoice to validate access and get the expected total
+  const invoice = await prisma.invoice.findUnique({ where: { id } });
+  if (!invoice) {
+    return res.status(404).json({ error: 'Invoice not found' });
+  }
+
+  // Clients can only pay their own invoice
+  if (req.user.role === 'client') {
+    const patientRecord = await prisma.patient.findFirst({ where: { userId: req.user.id } });
+    if (!patientRecord || patientRecord.id !== invoice.patientId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
+  // ── Verify with PayPal ──────────────────────────────────────────────────────
+  try {
+    await paypal.verifyOrder(orderId, amount);
+  } catch (verifyError) {
+    console.error('[billing:paypal] Verification failed:', verifyError.message);
+    return res.status(402).json({ error: verifyError.message });
+  }
+
+  // ── Record the payment now that PayPal confirmed it ─────────────────────────
+  const isPaid = parseFloat(amount) >= invoice.total;
+
+  const updatedInvoice = await prisma.invoice.update({
+    where: { id },
+    data: {
+      status: isPaid ? 'paid' : 'partial',
+      paymentDate: isPaid ? new Date() : (invoice.paymentDate ?? undefined),
+      paymentMethod: paymentMethod || 'paypal',
+      transactionId: orderId,
+    },
+    include: {
+      patient: {
+        include: {
+          user: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+        },
+      },
+      items: true,
+    },
+  });
+
+  void billingHelpers.cacheInvoice(updatedInvoice.patientId, updatedInvoice);
+
+  return res.json(updatedInvoice);
+});
+
 module.exports = {
   getInvoices,
   getInvoice,
@@ -592,6 +662,7 @@ module.exports = {
   updateInvoice,
   deleteInvoice,
   addPayment,
+  verifyPayPalPayment,
   getBillingSummary,
   getClaims,
   getClaim,

@@ -264,6 +264,7 @@ model Invoice {
   status          InvoiceStatus @default(draft)
   paymentDate     DateTime?
   paymentMethod   String?
+  transactionId   String?       // PayPal order ID or external transaction reference
   notes           String?
   
   createdAt       DateTime @default(now())
