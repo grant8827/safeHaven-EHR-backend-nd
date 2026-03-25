@@ -275,6 +275,9 @@ model Invoice {
 
   @@index([patientId])
   @@index([status])
+  @@index([date])
+  @@index([dueDate])
+  @@index([status, dueDate])
 }
 
 model InvoiceItem {

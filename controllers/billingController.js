@@ -28,6 +28,50 @@ const billingHelpers = {
       await redisClient.publish('billing:new-invoice', JSON.stringify({ patientId, invoiceId, total, ts: Date.now() }));
     } catch (e) {}
   },
+
+  // Generic short-lived cache (summary + admin list)
+  setCache: async (key, data, ttlSec) => {
+    if (!redisClient) return;
+    try { await redisClient.setex(key, ttlSec, JSON.stringify(data)); }
+    catch (e) { console.error('[billing:cache] setex error:', e.message); }
+  },
+  getCache: async (key) => {
+    if (!redisClient) return null;
+    try {
+      const raw = await redisClient.get(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+
+  // Admin invoice list – stored in a hash so a single DEL invalidates all pages/filters
+  setAdminInvoiceList: async (fingerprint, data) => {
+    if (!redisClient) return;
+    try {
+      await redisClient.hset('billing:admin:invoices', fingerprint, JSON.stringify(data));
+      await redisClient.expire('billing:admin:invoices', 60); // 60s rolling TTL
+    } catch (e) {}
+  },
+  getAdminInvoiceList: async (fingerprint) => {
+    if (!redisClient) return null;
+    try {
+      const raw = await redisClient.hget('billing:admin:invoices', fingerprint);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+  invalidateAdminInvoices: async () => {
+    if (!redisClient) return;
+    try { await redisClient.del('billing:admin:invoices'); } catch (e) {}
+  },
+
+  // Bust summary caches for admin + optionally a specific patient
+  invalidateSummaries: async (patientId) => {
+    if (!redisClient) return;
+    try {
+      const keys = ['billing:summary:admin'];
+      if (patientId) keys.push(`billing:summary:patient:${patientId}`);
+      await redisClient.del(keys);
+    } catch (e) {}
+  },
 };
 
 // Get all invoices (with filters)
@@ -48,6 +92,8 @@ const getInvoices = asyncHandler(async (req, res) => {
 
   const where = {};
 
+  let adminCacheKey = null;
+
   if (userRole === 'client') {
     // Clients may only see their own invoices; look up the Patient record
     const patientRecord = await prisma.patient.findFirst({ where: { userId } });
@@ -60,6 +106,11 @@ const getInvoices = asyncHandler(async (req, res) => {
     }
     where.patientId = patientRecord.id;
   } else {
+    // Admin/staff path – check cache first
+    adminCacheKey = `p${page}:l${limit}:pid${patientId || ''}:s${status || ''}:sd${startDate || ''}:ed${endDate || ''}`;
+    const adminCached = await billingHelpers.getAdminInvoiceList(adminCacheKey);
+    if (adminCached) return res.json(adminCached);
+
     if (patientId) where.patientId = patientId;
     if (status) where.status = status;
     if (startDate || endDate) {
@@ -106,17 +157,21 @@ const getInvoices = asyncHandler(async (req, res) => {
     prisma.invoice.count({ where }),
   ]);
 
-  // Warm Redis cache on DB-hit for client requests
+  // Warm Redis cache on DB-hit
   if (userRole === 'client' && invoices.length > 0) {
     for (const inv of invoices) void billingHelpers.cacheInvoice(inv.patientId, inv);
   }
 
-  return res.json({
+  const result = {
     results: invoices,
     count: total,
     next: skip + take < total ? parseInt(page) + 1 : null,
     previous: page > 1 ? parseInt(page) - 1 : null,
-  });
+  };
+
+  if (adminCacheKey) void billingHelpers.setAdminInvoiceList(adminCacheKey, result);
+
+  return res.json(result);
 });
 
 // Get single invoice
@@ -232,6 +287,8 @@ const createInvoice = asyncHandler(async (req, res) => {
   // Write-through Redis cache + Pub/Sub notification for real-time patient view
   void billingHelpers.cacheInvoice(invoice.patientId, invoice);
   void billingHelpers.publishNewInvoice(invoice.patientId, invoice.id, invoice.total);
+  void billingHelpers.invalidateSummaries(invoice.patientId);
+  void billingHelpers.invalidateAdminInvoices();
 
   return res.status(201).json(invoice);
 });
@@ -287,6 +344,8 @@ const updateInvoice = asyncHandler(async (req, res) => {
 
   // Update Redis cache after write
   void billingHelpers.cacheInvoice(invoice.patientId, invoice);
+  void billingHelpers.invalidateSummaries(invoice.patientId);
+  void billingHelpers.invalidateAdminInvoices();
 
   return res.json(invoice);
 });
@@ -301,7 +360,11 @@ const deleteInvoice = asyncHandler(async (req, res) => {
     where: { id },
   });
 
-  if (existing) void billingHelpers.removeInvoice(existing.patientId, id);
+  if (existing) {
+    void billingHelpers.removeInvoice(existing.patientId, id);
+    void billingHelpers.invalidateSummaries(existing.patientId);
+    void billingHelpers.invalidateAdminInvoices();
+  }
 
   return res.status(204).send();
 });
@@ -352,6 +415,8 @@ const addPayment = asyncHandler(async (req, res) => {
 
   // Update Redis cache
   void billingHelpers.cacheInvoice(updatedInvoice.patientId, updatedInvoice);
+  void billingHelpers.invalidateSummaries(updatedInvoice.patientId);
+  void billingHelpers.invalidateAdminInvoices();
 
   return res.json(updatedInvoice);
 });
@@ -558,13 +623,22 @@ const getBillingSummary = asyncHandler(async (req, res) => {
   const userRole = req.user.role;
   const where = {};
 
+  let summaryKey;
+
   if (userRole === 'client') {
     const patientRecord = await prisma.patient.findFirst({ where: { userId } });
     if (!patientRecord) {
       return res.json({ totalBilled: 0, invoiceCount: 0, totalPaid: 0, paidCount: 0, totalOutstanding: 0, pendingCount: 0, totalOverdue: 0, overdueCount: 0 });
     }
     where.patientId = patientRecord.id;
+    summaryKey = `billing:summary:patient:${patientRecord.id}`;
+  } else {
+    summaryKey = 'billing:summary:admin';
   }
+
+  // Redis fast-path
+  const cached = await billingHelpers.getCache(summaryKey);
+  if (cached) return res.json(cached);
 
   const now = new Date();
   const [all, paid, pending, overdue] = await Promise.all([
@@ -574,7 +648,7 @@ const getBillingSummary = asyncHandler(async (req, res) => {
     prisma.invoice.aggregate({ where: { ...where, status: { notIn: ['paid', 'cancelled'] }, dueDate: { lt: now } }, _sum: { total: true }, _count: { id: true } }),
   ]);
 
-  return res.json({
+  const summary = {
     totalBilled: all._sum.total ?? 0,
     invoiceCount: all._count.id ?? 0,
     totalPaid: paid._sum.total ?? 0,
@@ -583,7 +657,12 @@ const getBillingSummary = asyncHandler(async (req, res) => {
     pendingCount: pending._count.id ?? 0,
     totalOverdue: overdue._sum.total ?? 0,
     overdueCount: overdue._count.id ?? 0,
-  });
+  };
+
+  // Cache: 120s for patients (their data changes infrequently), 60s for admin
+  void billingHelpers.setCache(summaryKey, summary, userRole === 'client' ? 120 : 60);
+
+  return res.json(summary);
 });
 
 /**
@@ -651,6 +730,8 @@ const verifyPayPalPayment = asyncHandler(async (req, res) => {
   });
 
   void billingHelpers.cacheInvoice(updatedInvoice.patientId, updatedInvoice);
+  void billingHelpers.invalidateSummaries(updatedInvoice.patientId);
+  void billingHelpers.invalidateAdminInvoices();
 
   return res.json(updatedInvoice);
 });
