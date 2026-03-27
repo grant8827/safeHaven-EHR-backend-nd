@@ -8,6 +8,8 @@ const toSnakeUser = (user) => ({
   last_name: user.lastName,
   is_active: user.isActive,
   must_change_password: user.mustChangePassword,
+  bio: user.bio ?? null,
+  job_title: user.jobTitle ?? null,
   created_at: user.createdAt,
   updated_at: user.updatedAt,
 });
@@ -22,6 +24,8 @@ const toCamelUser = (user) => ({
   lastName: user.lastName,
   isActive: user.isActive,
   mustChangePassword: user.mustChangePassword,
+  bio: user.bio ?? null,
+  jobTitle: user.jobTitle ?? null,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });

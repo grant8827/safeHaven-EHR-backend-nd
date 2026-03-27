@@ -33,6 +33,8 @@ const authenticate = async (req, res, next) => {
         lastName: true,
         isActive: true,
         mustChangePassword: true,
+        bio: true,
+        jobTitle: true,
         createdAt: true,
         updatedAt: true,
       },

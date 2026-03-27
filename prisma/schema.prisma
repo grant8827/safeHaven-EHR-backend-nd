@@ -86,6 +86,8 @@ model User {
   role               UserRole @default(client)
   isActive           Boolean  @default(true)
   mustChangePassword Boolean  @default(false)
+  bio                String?
+  jobTitle           String?
   lastLogin          DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -107,6 +109,7 @@ model User {
   createdNotes       SOAPNote[]
   sessionParticipants TelehealthParticipant[]
   therapistSessions  TelehealthSession[] @relation("sessionTherapist")
+  notifications      Notification[]
 
   @@index([role])
   @@index([isActive])
@@ -544,4 +547,46 @@ model AuditLog {
   @@index([resource])
   @@index([createdAt])
   @@index([userId])
+}
+
+// In-app Notifications
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([type])
+}
+
+// Notification Templates
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  type      String   @unique
+  title     String
+  body      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+}
+
+// Message Templates
+model MessageTemplate {
+  id        String   @id @default(uuid())
+  type      String   @unique
+  subject   String
+  body      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
 }

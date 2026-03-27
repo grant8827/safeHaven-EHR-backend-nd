@@ -77,6 +77,8 @@ const getUser = asyncHandler(async (req, res) => {
       lastName: true,
       isActive: true,
       mustChangePassword: true,
+      bio: true,
+      jobTitle: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -93,14 +95,21 @@ const getUser = asyncHandler(async (req, res) => {
 
 // Update user profile (self)
 const updateProfile = asyncHandler(async (req, res) => {
-  const { firstName, lastName, email } = req.body;
+  // Accept both camelCase and snake_case body fields from frontend
+  const firstName = req.body.firstName ?? req.body.first_name;
+  const lastName  = req.body.lastName  ?? req.body.last_name;
+  const email     = req.body.email;
+  const bio       = req.body.bio;
+  const jobTitle  = req.body.jobTitle  ?? req.body.job_title;
   const userId = req.user.id;
 
   const updateData = {};
   
   if (firstName !== undefined) updateData.firstName = firstName;
-  if (lastName !== undefined) updateData.lastName = lastName;
-  if (email !== undefined) updateData.email = email;
+  if (lastName  !== undefined) updateData.lastName  = lastName;
+  if (email     !== undefined) updateData.email     = email;
+  if (bio       !== undefined) updateData.bio       = bio;
+  if (jobTitle  !== undefined) updateData.jobTitle  = jobTitle;
 
   const user = await prisma.user.update({
     where: { id: userId },
@@ -114,7 +123,8 @@ const updateProfile = asyncHandler(async (req, res) => {
       lastName: true,
       isActive: true,
       mustChangePassword: true,
-
+      bio: true,
+      jobTitle: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -128,23 +138,26 @@ const updateProfile = asyncHandler(async (req, res) => {
 // Update user (admin only)
 const updateUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const {
-    email,
-    role,
-    firstName,
-    lastName,
-    isActive,
-    mustChangePassword,
-  } = req.body;
+  // Accept both camelCase and snake_case body fields from frontend
+  const email              = req.body.email;
+  const role               = req.body.role;
+  const firstName          = req.body.firstName          ?? req.body.first_name;
+  const lastName           = req.body.lastName           ?? req.body.last_name;
+  const isActive           = req.body.isActive           ?? req.body.is_active;
+  const mustChangePassword = req.body.mustChangePassword ?? req.body.must_change_password;
+  const bio                = req.body.bio;
+  const jobTitle           = req.body.jobTitle           ?? req.body.job_title;
 
   const updateData = {};
   
-  if (email !== undefined) updateData.email = email;
-  if (role !== undefined) updateData.role = role;
-  if (firstName !== undefined) updateData.firstName = firstName;
-  if (lastName !== undefined) updateData.lastName = lastName;
-  if (isActive !== undefined) updateData.isActive = isActive;
+  if (email              !== undefined) updateData.email              = email;
+  if (role               !== undefined) updateData.role               = role;
+  if (firstName          !== undefined) updateData.firstName          = firstName;
+  if (lastName           !== undefined) updateData.lastName           = lastName;
+  if (isActive           !== undefined) updateData.isActive           = isActive;
   if (mustChangePassword !== undefined) updateData.mustChangePassword = mustChangePassword;
+  if (bio                !== undefined) updateData.bio                = bio;
+  if (jobTitle           !== undefined) updateData.jobTitle           = jobTitle;
 
   const user = await prisma.user.update({
     where: { id },
@@ -158,6 +171,8 @@ const updateUser = asyncHandler(async (req, res) => {
       lastName: true,
       isActive: true,
       mustChangePassword: true,
+      bio: true,
+      jobTitle: true,
       createdAt: true,
       updatedAt: true,
     },

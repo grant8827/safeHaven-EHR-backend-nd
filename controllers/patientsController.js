@@ -324,6 +324,55 @@ const createPatient = asyncHandler(async (req, res) => {
     console.error(`❌ Error sending welcome email to ${user.email}:`, emailError);
   }
 
+  // Send in-app welcome notification + message using templates
+  try {
+    const [notifTemplate, msgTemplate, adminUser] = await Promise.all([
+      prisma.notificationTemplate.findUnique({ where: { type: 'welcome' } }),
+      prisma.messageTemplate.findUnique({ where: { type: 'welcome' } }),
+      prisma.user.findFirst({ where: { role: 'admin', isActive: true }, orderBy: { createdAt: 'asc' } }),
+    ]);
+
+    // Create in-app notification for the new patient
+    if (notifTemplate && notifTemplate.isActive) {
+      await prisma.notification.create({
+        data: {
+          userId: user.id,
+          type: notifTemplate.type,
+          title: notifTemplate.title,
+          body: notifTemplate.body,
+        },
+      });
+      console.log(`✅ Welcome notification created for patient: ${user.email}`);
+    }
+
+    // Create welcome message thread from admin to patient
+    if (msgTemplate && msgTemplate.isActive && adminUser) {
+      const personalizedBody = msgTemplate.body.replace(/\{\{first_name\}\}/gi, user.firstName);
+      await prisma.messageThread.create({
+        data: {
+          subject: msgTemplate.subject,
+          participants: {
+            create: [
+              { userId: adminUser.id },
+              { userId: user.id },
+            ],
+          },
+          messages: {
+            create: {
+              senderId: adminUser.id,
+              content: personalizedBody,
+              priority: 'normal',
+            },
+          },
+        },
+      });
+      console.log(`✅ Welcome message sent to patient: ${user.email}`);
+    }
+  } catch (templateError) {
+    // Non-fatal — patient was still created successfully
+    console.error('⚠️ Error sending welcome templates:', templateError);
+  }
+
   // Transform to snake_case for API response
   const transformedPatient = toSnakePatient(patient);
 
@@ -340,11 +389,20 @@ const createPatient = asyncHandler(async (req, res) => {
 const updatePatient = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
+  // Fetch existing patient for role check + therapist-change detection
+  const existingPatient = await prisma.patient.findUnique({
+    where: { id },
+    select: {
+      assignedTherapistId: true,
+      primaryDiagnosis: true,
+      user: { select: { id: true, firstName: true, lastName: true } },
+    },
+  });
+  if (!existingPatient) return res.status(404).json({ error: 'Patient not found' });
+
   // Privacy: therapist can only update their assigned patient
   if (req.user.role === 'therapist') {
-    const existing = await prisma.patient.findUnique({ where: { id }, select: { assignedTherapistId: true } });
-    if (!existing) return res.status(404).json({ error: 'Patient not found' });
-    if (existing.assignedTherapistId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (existingPatient.assignedTherapistId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   }
 
   const {
@@ -408,10 +466,97 @@ const updatePatient = asyncHandler(async (req, res) => {
           username: true,
           firstName: true,
           lastName: true,
+          bio: true,
         },
       },
     },
   });
+
+  // ── Fire assign_therapist notifications & messages when therapist changes ──
+  const therapistChanged =
+    assignedTherapistId !== undefined &&
+    assignedTherapistId !== null &&
+    assignedTherapistId !== existingPatient.assignedTherapistId;
+
+  if (therapistChanged && patient.assignedTherapist) {
+    try {
+      const therapist = patient.assignedTherapist;
+      const patientUser = existingPatient.user;
+      const primaryDiagnosis = existingPatient.primaryDiagnosis || 'Not specified';
+      const therapistFullName = `${therapist.firstName} ${therapist.lastName}`;
+      const patientFullName = `${patientUser.firstName} ${patientUser.lastName}`;
+      const therapistBio = therapist.bio || '';
+
+      // Find an admin to be the message sender
+      const adminUser = await prisma.user.findFirst({ where: { role: 'admin' }, select: { id: true } });
+      const senderId = adminUser?.id || req.user.id;
+
+      // 1. Patient notification
+      const patNotifTpl = await prisma.notificationTemplate.findUnique({ where: { type: 'assign_therapist_patient' } });
+      if (patNotifTpl) {
+        await prisma.notification.create({
+          data: {
+            userId: patientUser.id,
+            type: 'assign_therapist_patient',
+            title: patNotifTpl.title,
+            body: patNotifTpl.body,
+            isRead: false,
+          },
+        });
+      }
+
+      // 2. Patient message
+      const patMsgTpl = await prisma.messageTemplate.findUnique({ where: { type: 'assign_therapist_patient' } });
+      if (patMsgTpl) {
+        const patMsgBody = patMsgTpl.body
+          .replace(/\{\{therapist_name\}\}/g, therapistFullName)
+          .replace(/\{\{therapist_bio\}\}/g, therapistBio);
+        const patThread = await prisma.messageThread.create({
+          data: {
+            subject: patMsgTpl.subject,
+            participants: { create: [{ userId: senderId }, { userId: patientUser.id }] },
+          },
+        });
+        await prisma.message.create({
+          data: { threadId: patThread.id, senderId, body: patMsgBody },
+        });
+      }
+
+      // 3. Therapist notification
+      const thrNotifTpl = await prisma.notificationTemplate.findUnique({ where: { type: 'assign_therapist_therapist' } });
+      if (thrNotifTpl) {
+        const thrNotifBody = thrNotifTpl.body.replace(/\{\{patient_name\}\}/g, patientFullName);
+        await prisma.notification.create({
+          data: {
+            userId: therapist.id,
+            type: 'assign_therapist_therapist',
+            title: thrNotifTpl.title,
+            body: thrNotifBody,
+            isRead: false,
+          },
+        });
+      }
+
+      // 4. Therapist message
+      const thrMsgTpl = await prisma.messageTemplate.findUnique({ where: { type: 'assign_therapist_therapist' } });
+      if (thrMsgTpl) {
+        const thrMsgBody = thrMsgTpl.body
+          .replace(/\{\{patient_name\}\}/g, patientFullName)
+          .replace(/\{\{primary_diagnosis\}\}/g, primaryDiagnosis);
+        const thrThread = await prisma.messageThread.create({
+          data: {
+            subject: thrMsgTpl.subject,
+            participants: { create: [{ userId: senderId }, { userId: therapist.id }] },
+          },
+        });
+        await prisma.message.create({
+          data: { threadId: thrThread.id, senderId, body: thrMsgBody },
+        });
+      }
+    } catch (notifErr) {
+      console.error('⚠️  assign_therapist notifications failed (non-fatal):', notifErr.message);
+    }
+  }
 
   return res.json(patient);
 });
