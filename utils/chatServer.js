@@ -19,7 +19,7 @@ const jwt = require('jsonwebtoken');
 const prisma = require('./prisma');
 const { chatHelpers, presenceHelpers } = require('./redis');
 
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'your-secret-key';
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 
 /**
  * Attach the /chat namespace to an existing Socket.io server instance.

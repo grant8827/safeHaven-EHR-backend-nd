@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -184,13 +185,14 @@ const requestPasswordReset = asyncHandler(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (user) {
-    const token = uuidv4();
+    const rawToken = uuidv4();
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 1); // 1 hour
 
     await prisma.passwordResetToken.create({
       data: {
-        token,
+        token: tokenHash,
         userId: user.id,
         expiresAt,
       },
@@ -199,7 +201,7 @@ const requestPasswordReset = asyncHandler(async (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL ||
       (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').find(u => u.trim().startsWith('https://'))?.trim() : null) ||
       'http://localhost:5173';
-    const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
+    const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
     sendPasswordResetEmail({ email: user.email, firstName: user.firstName, resetUrl }).catch((err) =>
       console.error('Password reset email error:', err)
     );
@@ -217,8 +219,10 @@ const resetPassword = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'Token and new password are required' });
   }
 
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
   const resetToken = await prisma.passwordResetToken.findUnique({
-    where: { token },
+    where: { token: tokenHash },
     include: { user: true },
   });
 
@@ -234,7 +238,7 @@ const resetPassword = asyncHandler(async (req, res) => {
       data: { passwordHash, mustChangePassword: false },
     }),
     prisma.passwordResetToken.update({
-      where: { token },
+      where: { token: tokenHash },
       data: { usedAt: new Date() },
     }),
   ]);

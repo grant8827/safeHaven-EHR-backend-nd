@@ -24,9 +24,12 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
-  // Default error
+  // Default error — never leak internal messages to clients in production
+  const isProd = process.env.NODE_ENV === 'production';
   res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
+    error: isProd && (!err.status || err.status >= 500)
+      ? 'An internal server error occurred'
+      : (err.message || 'Internal server error'),
   });
 };
 

@@ -2,7 +2,11 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../utils/prisma');
 const { tokenHelpers } = require('../utils/redis');
 
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'your-secret-key';
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
+if (!JWT_ACCESS_SECRET) {
+  console.error('FATAL: JWT_ACCESS_SECRET environment variable is not set');
+  process.exit(1);
+}
 
 // Authentication middleware
 const authenticate = async (req, res, next) => {
@@ -59,7 +63,7 @@ const authenticate = async (req, res, next) => {
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Token expired' });
     }
-    return res.status(500).json({ error: 'Authentication failed', details: err.message });
+    return res.status(500).json({ error: 'Authentication failed' });
   }
 };
 

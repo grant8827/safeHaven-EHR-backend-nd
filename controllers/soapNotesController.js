@@ -211,6 +211,12 @@ const updateSoapNote = asyncHandler(async (req, res) => {
 
 const deleteSoapNote = asyncHandler(async (req, res) => {
   const { id } = req.params;
+
+  // Only admins may delete SOAP notes
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only administrators can delete SOAP notes' });
+  }
+
   const note = await prisma.sOAPNote.findUnique({
     where: { id },
     select: { id: true, patientId: true, therapistId: true, isLocked: true },

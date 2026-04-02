@@ -30,6 +30,8 @@ build
 # Environment variables
 .env
 .env.local
+.env.development
+.env.production
 .env.development.local
 .env.test.local
 .env.production.local
@@ -40,6 +42,9 @@ coverage
 # HIPAA Compliance - never commit sensitive data
 *.key
 *.pem
+# Prevent any future .env variants
+.env.*
+!.env.example
 *.p12
 *.pfx
 *.crt

@@ -3,6 +3,8 @@ const http = require('http');
 const cors = require('cors');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
+const helmet = require('helmet');
+const { authLimiter, generalLimiter } = require('./middleware/rateLimit');
 const { testEmailConnection } = require('./utils/emailService');
 const { redisClient } = require('./utils/redis');
 const { createSignalingServer } = require('./utils/signalingServer');
@@ -26,13 +28,15 @@ const allowedOrigins = [
   ...corsOrigins
 ].filter(Boolean);
 
-// Security headers
-app.use((req, res, next) => {
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  next();
-});
+// Security headers via Helmet
+// contentSecurityPolicy disabled here — managed by the frontend static server.
+// crossOriginEmbedderPolicy disabled to allow WebRTC blob: media streams.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+// General rate limiter for all API routes (300 req / 15 min per IP)
+app.use('/api', generalLimiter);
 
 // Middleware
 app.use(cors({ 
@@ -74,7 +78,7 @@ app.get('/api/health', (req, res) => {
 
 // API Routes - v1 (camelCase responses)
 const v1Router = express.Router();
-v1Router.use('/users/auth', authRoutes);
+v1Router.use('/users/auth', authLimiter, authRoutes);
 v1Router.use('/users', usersRoutes);
 v1Router.use('/patients', patientsRoutes);
 v1Router.use('/appointments', appointmentsRoutes);
@@ -91,7 +95,7 @@ v1Router.use('/templates', templatesRoutes);
 app.use('/api/v1', v1Router);
 
 // API Routes - Legacy (snake_case responses)
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/patients', patientsRoutes);
 app.use('/api/appointments', appointmentsRoutes);

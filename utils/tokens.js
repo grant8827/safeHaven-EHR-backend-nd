@@ -2,8 +2,12 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('./prisma');
 
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'your-secret-key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+if (!JWT_ACCESS_SECRET || !JWT_REFRESH_SECRET) {
+  console.error('FATAL: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET environment variables must be set');
+  process.exit(1);
+}
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 

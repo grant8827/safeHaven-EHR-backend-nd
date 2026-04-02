@@ -216,6 +216,14 @@ const getInvoice = asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Invoice not found' });
   }
 
+  // Client can only view their own invoice
+  if (req.user.role === 'client') {
+    const patientRecord = await prisma.patient.findFirst({ where: { userId: req.user.id } });
+    if (!patientRecord || patientRecord.id !== invoice.patientId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
   return res.json(invoice);
 });
 
