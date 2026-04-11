@@ -518,7 +518,7 @@ const updatePatient = asyncHandler(async (req, res) => {
           },
         });
         await prisma.message.create({
-          data: { threadId: patThread.id, senderId, body: patMsgBody },
+          data: { threadId: patThread.id, senderId, content: patMsgBody, priority: 'normal' },
         });
       }
 
@@ -550,7 +550,7 @@ const updatePatient = asyncHandler(async (req, res) => {
           },
         });
         await prisma.message.create({
-          data: { threadId: thrThread.id, senderId, body: thrMsgBody },
+          data: { threadId: thrThread.id, senderId, content: thrMsgBody, priority: 'normal' },
         });
       }
     } catch (notifErr) {
