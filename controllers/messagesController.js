@@ -608,6 +608,21 @@ const deleteMessage = asyncHandler(async (req, res) => {
   return res.status(204).send();
 });
 
+// Get total unread message count for current user
+const getUnreadMessageCount = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const count = await prisma.message.count({
+    where: {
+      readAt: null,
+      senderId: { not: userId },
+      thread: {
+        participants: { some: { userId } },
+      },
+    },
+  });
+  return res.json({ count });
+});
+
 module.exports = {
   getThreads,
   getThread,
@@ -618,4 +633,5 @@ module.exports = {
   toggleStar,
   deleteMessage,
   getRecipients,
+  getUnreadMessageCount,
 };

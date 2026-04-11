@@ -9,6 +9,9 @@ router.use(authenticate);
 // Allowed recipients for compose dialog (role-filtered)
 router.get('/recipients', messagesController.getRecipients);
 
+// Unread message count badge
+router.get('/unread_count', messagesController.getUnreadMessageCount);
+
 // Message threads
 router.get('/threads', messagesController.getThreads);
 router.post('/threads', messagesController.createThread);
