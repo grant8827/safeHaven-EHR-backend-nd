@@ -283,9 +283,9 @@ const changePassword = asyncHandler(async (req, res) => {
   }
 
   // Validate new password strength
-  if (newPassword.length < 8) {
+  if (newPassword.length < 10) {
     return res.status(400).json({ 
-      error: 'New password must be at least 8 characters long' 
+      error: 'New password must be at least 10 characters long' 
     });
   }
 
