@@ -16,6 +16,7 @@ router.get('/unread_count', messagesController.getUnreadMessageCount);
 router.get('/threads', messagesController.getThreads);
 router.post('/threads', messagesController.createThread);
 router.get('/threads/:id', messagesController.getThread);
+router.patch('/threads/:id/read_all', messagesController.markThreadAsRead);
 
 // Messages
 router.get('/threads/:threadId/messages', messagesController.getMessages);

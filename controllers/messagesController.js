@@ -516,6 +516,32 @@ const sendMessage = asyncHandler(async (req, res) => {
   return res.status(201).json({ ...message, thread: { id: resolvedThreadId } });
 });
 
+// Mark all messages in a thread as read for the current user
+const markThreadAsRead = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  // Verify user is a participant
+  const thread = await prisma.messageThread.findFirst({
+    where: { id, participants: { some: { userId } } },
+  });
+  if (!thread) {
+    return res.status(404).json({ error: 'Thread not found or access denied' });
+  }
+
+  // Mark all unread messages not sent by this user
+  await prisma.message.updateMany({
+    where: {
+      threadId: id,
+      senderId: { not: userId },
+      readAt: null,
+    },
+    data: { readAt: new Date() },
+  });
+
+  return res.json({ success: true });
+});
+
 // Mark message as read
 const markAsRead = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -630,6 +656,7 @@ module.exports = {
   getMessages,
   sendMessage,
   markAsRead,
+  markThreadAsRead,
   toggleStar,
   deleteMessage,
   getRecipients,
