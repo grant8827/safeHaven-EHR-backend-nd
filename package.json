@@ -8,6 +8,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "postinstall": "npx prisma generate",
     "start": "npx prisma db push --accept-data-loss && node seed_templates.js && node index.js",
     "dev": "nodemon index.js",
     "db:generate": "prisma generate",
