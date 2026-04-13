@@ -9,9 +9,14 @@ const errorHandler = (err, req, res, next) => {
 
   // Prisma errors
   if (err.code === 'P2002') {
-    return res.status(409).json({ 
-      error: 'A record with this value already exists',
-      field: err.meta?.target?.[0] 
+    const field = err.meta?.target?.[0];
+    const messages = {
+      username: 'Username is already taken',
+      email: 'An account with this email already exists',
+    };
+    return res.status(409).json({
+      error: messages[field] || 'A record with this value already exists',
+      field,
     });
   }
 
