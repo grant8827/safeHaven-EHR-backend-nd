@@ -19,7 +19,7 @@ router.get('/sessions/transcripts', telehealthController.getTranscripts);
 router.get('/sessions/:id', telehealthController.getSession);
 router.patch('/sessions/:id', requireRole('admin', 'therapist', 'staff'), telehealthController.updateSession);
 router.put('/sessions/:id', requireRole('admin', 'therapist', 'staff'), telehealthController.updateSession);
-router.delete('/sessions/:id', requireRole('admin'), telehealthController.deleteSession);
+router.delete('/sessions/:id', requireRole('admin', 'staff'), telehealthController.deleteSession);
 
 // Session actions
 router.post('/sessions/:id/start', requireRole('admin', 'therapist', 'staff'), telehealthController.startSession);

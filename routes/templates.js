@@ -19,15 +19,15 @@ router.use(authenticate);
 // Notification templates
 router.get('/notifications/', getNotificationTemplates);
 router.get('/notifications/:id/', getNotificationTemplate);
-router.post('/notifications/', requireRole('admin'), createNotificationTemplate);
-router.patch('/notifications/:id/', requireRole('admin'), updateNotificationTemplate);
-router.delete('/notifications/:id/', requireRole('admin'), deleteNotificationTemplate);
+router.post('/notifications/', requireRole('admin', 'staff'), createNotificationTemplate);
+router.patch('/notifications/:id/', requireRole('admin', 'staff'), updateNotificationTemplate);
+router.delete('/notifications/:id/', requireRole('admin', 'staff'), deleteNotificationTemplate);
 
 // Message templates
 router.get('/messages/', getMessageTemplates);
 router.get('/messages/:id/', getMessageTemplate);
-router.post('/messages/', requireRole('admin'), createMessageTemplate);
-router.patch('/messages/:id/', requireRole('admin'), updateMessageTemplate);
-router.delete('/messages/:id/', requireRole('admin'), deleteMessageTemplate);
+router.post('/messages/', requireRole('admin', 'staff'), createMessageTemplate);
+router.patch('/messages/:id/', requireRole('admin', 'staff'), updateMessageTemplate);
+router.delete('/messages/:id/', requireRole('admin', 'staff'), deleteMessageTemplate);
 
 module.exports = router;

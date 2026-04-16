@@ -10,7 +10,7 @@ router.use(authenticate);
 router.post('/logs/batch/', auditController.createAuditLogs);
 
 // Get audit logs (admin only)
-router.get('/logs', requireRole('admin'), auditController.getAuditLogs);
-router.get('/logs/:id', requireRole('admin'), auditController.getAuditLog);
+router.get('/logs', requireRole('admin', 'staff'), auditController.getAuditLogs);
+router.get('/logs/:id', requireRole('admin', 'staff'), auditController.getAuditLog);
 
 module.exports = router;

@@ -15,7 +15,7 @@ router.post('/invoices', requireRole('admin', 'staff'), billingController.create
 router.get('/invoices/:id', requireRole('admin', 'therapist', 'staff', 'client'), billingController.getInvoice);
 router.patch('/invoices/:id', requireRole('admin', 'staff'), billingController.updateInvoice);
 router.put('/invoices/:id', requireRole('admin', 'staff'), billingController.updateInvoice);
-router.delete('/invoices/:id', requireRole('admin'), billingController.deleteInvoice);
+router.delete('/invoices/:id', requireRole('admin', 'staff'), billingController.deleteInvoice);
 router.post('/invoices/:id/payment', requireRole('admin', 'staff', 'client'), billingController.addPayment);
 
 // PayPal-verified payment: verifies the order with PayPal's API before recording
@@ -27,6 +27,6 @@ router.post('/claims', requireRole('admin', 'staff'), billingController.createCl
 router.get('/claims/:id', requireRole('admin', 'staff'), billingController.getClaim);
 router.patch('/claims/:id', requireRole('admin', 'staff'), billingController.updateClaim);
 router.put('/claims/:id', requireRole('admin', 'staff'), billingController.updateClaim);
-router.delete('/claims/:id', requireRole('admin'), billingController.deleteClaim);
+router.delete('/claims/:id', requireRole('admin', 'staff'), billingController.deleteClaim);
 
 module.exports = router;

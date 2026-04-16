@@ -351,8 +351,8 @@ const getMessages = asyncHandler(async (req, res) => {
     thread_id: msg.threadId,
     content: msg.content,
     priority: msg.priority,
-    is_read: msg.isRead,
-    is_starred: false,
+    is_read: msg.readAt !== null,
+    is_starred: msg.isStarred,
     is_encrypted: msg.isEncrypted,
     created_at: msg.createdAt,
     sent_at: msg.sentAt,
@@ -603,10 +603,10 @@ const toggleStar = asyncHandler(async (req, res) => {
 
   const updatedMessage = await prisma.message.update({
     where: { id },
-    data: { isRead: message.isRead }, // isStarred not in schema — no-op update to return message
+    data: { isStarred: !message.isStarred },
   });
 
-  return res.json(updatedMessage);
+  return res.json({ is_starred: updatedMessage.isStarred });
 });
 
 // Delete message

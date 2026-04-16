@@ -766,13 +766,15 @@ const createEmergencySession = asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Patient not found' });
   }
 
-  // Create session with room ID
+  // Pre-generate IDs so sessionUrl can be built before the DB insert
+  const sessionId = uuidv4();
   const roomId = `emergency-${uuidv4()}`;
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  // URL uses session DB id (set after create) — built below after creation
+  const sessionUrl = `${frontendUrl}/telehealth/session/${sessionId}`;
 
   const session = await prisma.telehealthSession.create({
     data: {
+      id: sessionId,
       patientId: patient_id,
       therapistId,
       roomId,
@@ -818,13 +820,6 @@ const createEmergencySession = asyncHandler(async (req, res) => {
         },
       },
     },
-  });
-
-  // Build session URL using the DB id so VideoSession can look it up correctly
-  const sessionUrl = `${frontendUrl}/telehealth/session/${session.id}`;
-  await prisma.telehealthSession.update({
-    where: { id: session.id },
-    data: { sessionUrl },
   });
 
   // Send emergency invite email to patient (non-blocking — log error but don't fail the request)

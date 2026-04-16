@@ -361,6 +361,7 @@ model Message {
   priority      String   @default("normal") // low, normal, high, urgent
   
   isRead        Boolean  @default(false)
+  isStarred     Boolean  @default(false)
   isEncrypted   Boolean  @default(false)
   
   sentAt        DateTime @default(now())

@@ -85,7 +85,7 @@ Safe Haven Restoration Ministries`,
   // ── Assign Therapist: Therapist Message ───────────────────────────────────
   const assignThrMsgData = {
     subject: 'New Patient Assignment',
-    body: `{{patient_name}} needs counseling with {{primary_diagnosis}}`,
+    body: `{{patient_name}} has been assigned to you for counseling with {{primary_diagnosis}}`,
     isActive: true,
   };
   await prisma.messageTemplate.upsert({

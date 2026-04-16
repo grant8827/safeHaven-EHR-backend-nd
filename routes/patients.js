@@ -26,6 +26,6 @@ router.patch('/:id', requireRole('admin', 'therapist', 'staff'), patientsControl
 router.put('/:id', requireRole('admin', 'therapist', 'staff'), patientsController.updatePatient);
 
 // Delete patient
-router.delete('/:id', requireRole('admin'), patientsController.deletePatient);
+router.delete('/:id', requireRole('admin', 'staff'), patientsController.deletePatient);
 
 module.exports = router;

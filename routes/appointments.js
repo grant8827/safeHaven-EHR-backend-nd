@@ -32,6 +32,6 @@ router.post('/:id/cancel', requireRole('admin', 'therapist', 'staff', 'client'),
 router.post('/:id/no-show', requireRole('admin', 'therapist', 'staff'), appointmentsController.markNoShow);
 
 // Delete appointment
-router.delete('/:id', requireRole('admin'), appointmentsController.deleteAppointment);
+router.delete('/:id', requireRole('admin', 'staff'), appointmentsController.deleteAppointment);
 
 module.exports = router;

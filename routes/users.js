@@ -18,7 +18,7 @@ router.get('/clients/', usersController.getClients);
 // Admin routes
 router.get('/', requireRole('admin', 'staff'), usersController.getUsers);
 router.get('/:id/', requireRole('admin', 'staff'), usersController.getUser);
-router.patch('/:id/', requireRole('admin'), usersController.updateUser);
-router.delete('/:id/', requireRole('admin'), usersController.deleteUser);
+router.patch('/:id/', requireRole('admin', 'staff'), usersController.updateUser);
+router.delete('/:id/', requireRole('admin', 'staff'), usersController.deleteUser);
 
 module.exports = router;
