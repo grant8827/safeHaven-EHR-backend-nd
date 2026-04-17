@@ -215,6 +215,16 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
       }
     });
 
+    // ----------------------------------------------------------------
+    // transcript-entry – relay a single final speech entry to the other participant(s)
+    // ----------------------------------------------------------------
+    socket.on('transcript-entry', ({ roomId: room, entry }) => {
+      const dest = room || socket.roomId;
+      if (dest && entry) {
+        socket.to(dest).emit('transcript-entry', { entry });
+      }
+    });
+
     // ----------------------------------------------------------------    // leave-room – explicit graceful leave
     // ----------------------------------------------------------------
     socket.on('leave-room', async ({ roomId: room }) => {
