@@ -21,6 +21,9 @@ router.post('/:id/resend-welcome-email', requireRole('admin', 'staff'), patients
 // Get single patient
 router.get('/:id', requireRole('admin', 'therapist', 'staff', 'client'), patientsController.getPatient);
 
+// Update patient agreements
+router.put('/:id/agreements', requireRole('admin', 'therapist', 'staff', 'client'), patientsController.updatePatientAgreements);
+
 // Update patient
 router.patch('/:id', requireRole('admin', 'therapist', 'staff'), patientsController.updatePatient);
 router.put('/:id', requireRole('admin', 'therapist', 'staff'), patientsController.updatePatient);

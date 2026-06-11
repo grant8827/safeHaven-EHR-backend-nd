@@ -680,6 +680,64 @@ const getPatientByUserId = asyncHandler(async (req, res) => {
   return res.json(patient);
 });
 
+// Update patient agreements
+const updatePatientAgreements = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { agreementType, signature, date } = req.body;
+
+  // Validate inputs
+  if (!agreementType || !signature || !date) {
+    return res.status(400).json({ error: 'Missing required fields: agreementType, signature, or date' });
+  }
+
+  // Ensure valid agreement type
+  const validTypes = ['consentForm', 'treatmentAgreement', 'hipaa', 'privacyPolicy'];
+  if (!validTypes.includes(agreementType)) {
+    return res.status(400).json({ error: 'Invalid agreement type' });
+  }
+
+  // Verify patient exists
+  const patient = await prisma.patient.findUnique({
+    where: { id },
+  });
+
+  if (!patient) {
+    return res.status(404).json({ error: 'Patient not found' });
+  }
+
+  // Privacy: client can only update their own agreements
+  if (req.user.role === 'client' && patient.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Map type to database fields
+  const dataToUpdate = {};
+  if (agreementType === 'consentForm') {
+    dataToUpdate.consentFormSigned = true;
+    dataToUpdate.consentFormSignature = signature;
+    dataToUpdate.consentFormDate = new Date(date);
+  } else if (agreementType === 'treatmentAgreement') {
+    dataToUpdate.treatmentAgreementSigned = true;
+    dataToUpdate.treatmentAgreementSignature = signature;
+    dataToUpdate.treatmentAgreementDate = new Date(date);
+  } else if (agreementType === 'hipaa') {
+    dataToUpdate.hipaaAuthorized = true;
+    dataToUpdate.hipaaSignature = signature;
+    dataToUpdate.hipaaDate = new Date(date);
+  } else if (agreementType === 'privacyPolicy') {
+    dataToUpdate.privacyPolicyAcknowledged = true;
+    dataToUpdate.privacyPolicySignature = signature;
+    dataToUpdate.privacyPolicyDate = new Date(date);
+  }
+
+  const updatedPatient = await prisma.patient.update({
+    where: { id },
+    data: dataToUpdate,
+  });
+
+  return res.json(updatedPatient);
+});
+
 module.exports = {
   getPatients,
   getPatient,
@@ -688,4 +746,5 @@ module.exports = {
   deletePatient,
   getPatientByUserId,
   resendWelcomeEmail,
+  updatePatientAgreements,
 };

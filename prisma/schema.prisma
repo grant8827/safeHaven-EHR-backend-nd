@@ -171,6 +171,23 @@ model Patient {
   allergies           String?
   primaryDiagnosis    String?
   
+  // Agreements & Consent
+  consentFormSigned   Boolean   @default(false)
+  consentFormSignature String?
+  consentFormDate     DateTime?
+  
+  treatmentAgreementSigned Boolean @default(false)
+  treatmentAgreementSignature String?
+  treatmentAgreementDate DateTime?
+  
+  hipaaAuthorized     Boolean   @default(false)
+  hipaaSignature      String?
+  hipaaDate           DateTime?
+  
+  privacyPolicyAcknowledged Boolean @default(false)
+  privacyPolicySignature    String?
+  privacyPolicyDate         DateTime?
+
   assignedTherapistId String?
   assignedTherapist   User?    @relation("assignedTherapist", fields: [assignedTherapistId], references: [id], onDelete: SetNull)
   isActive           Boolean  @default(true)
