@@ -12,16 +12,22 @@ const getSessions = asyncHandler(async (req, res) => {
     status,
     patientId,
     therapistId,
+    room_id: roomIdSnake,
+    roomId: roomIdCamel,
   } = req.query;
   const userId = req.user.id;
   const userRole = req.user.role;
 
-  const skip = (parseInt(page) - 1) * parseInt(limit);
-  const take = parseInt(limit);
+  const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+  const take = parseInt(limit, 10);
 
   const where = {};
 
   if (status) where.status = status;
+
+  // Support both room_id and roomId query params for join links.
+  const requestedRoomId = roomIdSnake || roomIdCamel;
+  if (requestedRoomId) where.roomId = requestedRoomId;
 
   // Access control — use direct patientId/therapistId columns (not participants junction)
   if (userRole === 'client') {
