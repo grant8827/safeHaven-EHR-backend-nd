@@ -660,10 +660,21 @@ const saveTranscript = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'sessionId and entries array are required' });
   }
 
-  // Validate session exists and belongs to this user
   const session = await prisma.telehealthSession.findUnique({ where: { id: sessionId } });
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
+  }
+
+  // Allow therapist, admin, staff, or any participant in this session
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  if (!['admin', 'staff'].includes(userRole) && session.therapistId !== userId) {
+    const participant = await prisma.telehealthParticipant.findFirst({
+      where: { sessionId, userId },
+    });
+    if (!participant) {
+      return res.status(403).json({ error: 'You are not a participant in this session' });
+    }
   }
 
   const transcript = await prisma.transcript.create({

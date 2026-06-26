@@ -30,7 +30,7 @@ router.post('/sessions/:id/leave', telehealthController.leaveSession);
 
 // Recordings and transcripts
 router.post('/recordings', requireRole('admin', 'therapist', 'staff'), telehealthController.saveRecording);
-router.post('/transcripts', requireRole('admin', 'therapist', 'staff'), telehealthController.saveTranscript);
+router.post('/transcripts', telehealthController.saveTranscript);
 
 // Presence (Redis-backed user online status for Waiting Room)
 router.get('/presence/:userId', telehealthController.getUserPresence);
