@@ -2,6 +2,7 @@ const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { toSnakeAppointment } = require('../utils/transformers');
 const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
 const { redisClient } = require('../utils/redis');
 
 // Get all appointments (with filters)
@@ -198,13 +199,19 @@ const createAppointment = asyncHandler(async (req, res) => {
     // If it's a telehealth appointment, create a session
     let createdSession = null;
     if (isTelehealth) {
+      // The session's own id is what gets embedded in sessionUrl below, so the
+      // "GET /telehealth/sessions/:id" lookup the video page does on load
+      // actually resolves — a separate roomId (used only for the WebRTC room
+      // name) must never be used in that URL.
+      const sessionId = uuidv4();
       const roomId = crypto.randomBytes(16).toString('hex');
       const sessionToken = crypto.randomBytes(32).toString('hex');
       const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const sessionUrl = `${baseUrl}/telehealth/session/${roomId}`;
+      const sessionUrl = `${baseUrl}/telehealth/session/${sessionId}`;
 
       createdSession = await tx.telehealthSession.create({
         data: {
+          id: sessionId,
           appointmentId: appointment.id,
           patientId,
           therapistId,
@@ -217,6 +224,14 @@ const createAppointment = asyncHandler(async (req, res) => {
           recordingEnabled: true,
           chatEnabled: true,
           screenShareEnabled: true,
+          // Pre-create both participants so neither side hits the 403 in
+          // joinSession that's reserved for uninvited, non-staff users.
+          participants: {
+            create: [
+              { userId: therapistId, role: 'therapist', status: 'invited' },
+              { userId: appointment.patient.user.id, role: 'patient', status: 'invited' },
+            ],
+          },
         },
       });
     }
@@ -314,15 +329,20 @@ const updateAppointment = asyncHandler(async (req, res) => {
     let newSession = null;
     if (isChangingToTelehealth && !appointment.session) {
       const durationMinutes = duration || Math.round((appointment.endTime - appointment.startTime) / 60000);
+      // See createAppointment for why sessionId (not roomId) must be the value
+      // embedded in sessionUrl.
+      const sessionId = uuidv4();
       const roomId = crypto.randomBytes(16).toString('hex');
       const sessionToken = crypto.randomBytes(32).toString('hex');
       const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const sessionUrl = `${baseUrl}/telehealth/session/${roomId}`;
+      const sessionUrl = `${baseUrl}/telehealth/session/${sessionId}`;
 
       newSession = await tx.telehealthSession.create({
         data: {
+          id: sessionId,
           appointmentId: appointment.id,
           patientId: appointment.patientId,
+          therapistId: appointment.therapistId,
           roomId,
           sessionUrl,
           sessionToken,
@@ -332,6 +352,12 @@ const updateAppointment = asyncHandler(async (req, res) => {
           recordingEnabled: true,
           chatEnabled: true,
           screenShareEnabled: true,
+          participants: {
+            create: [
+              { userId: appointment.therapistId, role: 'therapist', status: 'invited' },
+              { userId: appointment.patient.user.id, role: 'patient', status: 'invited' },
+            ],
+          },
         },
       });
     }

@@ -280,26 +280,38 @@ const createSession = asyncHandler(async (req, res) => {
   } = req.body;
 
   if (!patientId) {
-    return res.status(400).json({ 
-      error: 'patientId is required' 
+    return res.status(400).json({
+      error: 'patientId is required'
     });
   }
 
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  const generatedRoomId = roomId || uuidv4();
-  const sessionUrl = `${frontendUrl}/telehealth/session/${generatedRoomId}`;
+  // Resolve the patient's User id so they can be added as a participant below —
+  // patientId here is Patient.id, not User.id.
+  const patientRecord = await prisma.patient.findUnique({
+    where: { id: patientId },
+    select: { userId: true },
+  });
+  if (!patientRecord) {
+    return res.status(404).json({ error: 'Patient not found' });
+  }
 
-  // Bug 9 fixed: always include the creating therapist as a participant so
-  // they can join their own session without hitting a 404.
-  const therapistParticipant = { userId: req.user.id, role: 'therapist' };
+  // The session's own id is what gets embedded in sessionUrl below, so the
+  // "GET /telehealth/sessions/:id" lookup the video page does on load
+  // actually resolves — roomId (the WebRTC room name) must never be used here.
+  const sessionId = uuidv4();
+  const generatedRoomId = roomId || uuidv4();
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const sessionUrl = `${frontendUrl}/telehealth/session/${sessionId}`;
+
   const extraParticipants = participantIds && participantIds.length > 0
     ? participantIds
-        .filter((uid) => uid !== req.user.id) // avoid duplicate therapist row
+        .filter((uid) => uid !== req.user.id && uid !== patientRecord.userId)
         .map((uid) => ({ userId: uid, role: 'participant' }))
     : [];
 
   const session = await prisma.telehealthSession.create({
     data: {
+      id: sessionId,
       roomId: generatedRoomId,
       sessionUrl,
       patientId,
@@ -307,14 +319,12 @@ const createSession = asyncHandler(async (req, res) => {
       scheduledDuration: scheduledDuration || 60,
       status: 'scheduled',
       participants: {
-        // Always include the creating user (therapist) so joinSession never returns 404
+        // Always include the creating therapist and the patient so
+        // joinSession never 403s either side.
         create: [
           { userId: req.user.id, role: 'therapist' },
-          ...(participantIds && participantIds.length > 0
-            ? participantIds
-                .filter((uid) => uid !== req.user.id)
-                .map((uid) => ({ userId: uid, role: 'participant' }))
-            : []),
+          { userId: patientRecord.userId, role: 'patient' },
+          ...extraParticipants,
         ],
       },
     },
