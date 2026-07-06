@@ -609,3 +609,55 @@ model MessageTemplate {
 
   @@index([type])
 }
+
+// Public website leads — SHRM marketing site (unauthenticated visitors)
+enum LeadStatus {
+  new
+  contacted
+  converted
+  closed
+}
+
+model ContactSubmission {
+  id        String     @id @default(uuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  message   String
+  status    LeadStatus @default(new)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AppointmentRequest {
+  id                     String     @id @default(uuid())
+  firstName              String
+  lastName               String
+  email                  String
+  phone                  String
+  dateOfBirth            DateTime?
+  serviceType            String
+  preferredDate          DateTime
+  preferredTime          String
+  sessionType            String
+  hasInsurance           Boolean    @default(false)
+  insuranceProvider      String?
+  policyNumber           String?
+  isEmergency            Boolean    @default(false)
+  emergencyContactName   String?
+  emergencyContactPhone  String?
+  reasonForCounseling    String
+  previousCounseling     Boolean    @default(false)
+  medications            String?
+  additionalInfo         String?
+  status                 LeadStatus @default(new)
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}

@@ -381,6 +381,107 @@ const sendPasswordResetEmail = async ({ email, firstName, resetUrl }) => {
   }
 };
 
+// Notify staff of a new public contact form submission (SHRM website)
+const sendContactSubmissionNotification = async (submission) => {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: process.env.DEFAULT_FROM_EMAIL,
+      to: process.env.DEFAULT_FROM_EMAIL,
+      replyTo: submission.email,
+      subject: `New Website Contact Message: ${submission.subject}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #3c4535 0%, #2e3429 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+            .details { background: white; padding: 20px; border-left: 4px solid #fac800; margin: 20px 0; white-space: pre-wrap; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header"><h1>📩 New Contact Message</h1></div>
+            <div class="content">
+              <p><strong>Name:</strong> ${submission.name}<br>
+              <strong>Email:</strong> ${submission.email}<br>
+              ${submission.phone ? `<strong>Phone:</strong> ${submission.phone}<br>` : ''}
+              <strong>Subject:</strong> ${submission.subject}</p>
+              <div class="details">${submission.message}</div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Contact submission notification sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('❌ Failed to send contact submission notification:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Notify staff of a new public appointment request (SHRM website)
+const sendAppointmentRequestNotification = async (request) => {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: process.env.DEFAULT_FROM_EMAIL,
+      to: process.env.DEFAULT_FROM_EMAIL,
+      replyTo: request.email,
+      subject: `New Appointment Request: ${request.firstName} ${request.lastName}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #3c4535 0%, #2e3429 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+            .details { background: white; padding: 20px; border-left: 4px solid #fac800; margin: 20px 0; }
+            .emergency { background: #fde2e2; border-left: 4px solid #dc2626; padding: 15px; margin: 20px 0; font-weight: bold; color: #991b1b; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header"><h1>📅 New Appointment Request</h1></div>
+            <div class="content">
+              ${request.isEmergency ? '<div class="emergency">⚠️ Marked as an emergency situation — please follow up promptly.</div>' : ''}
+              <div class="details">
+                <p><strong>Name:</strong> ${request.firstName} ${request.lastName}<br>
+                <strong>Email:</strong> ${request.email}<br>
+                <strong>Phone:</strong> ${request.phone}<br>
+                <strong>Service Type:</strong> ${request.serviceType}<br>
+                <strong>Preferred Date/Time:</strong> ${request.preferredDate} at ${request.preferredTime}<br>
+                <strong>Session Type:</strong> ${request.sessionType}<br>
+                <strong>Reason:</strong> ${request.reasonForCounseling}<br>
+                <strong>Has Insurance:</strong> ${request.hasInsurance ? `Yes (${request.insuranceProvider || 'n/a'})` : 'No'}</p>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Appointment request notification sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('❌ Failed to send appointment request notification:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Test email configuration
 const testEmailConnection = async () => {
   try {
@@ -399,5 +500,7 @@ module.exports = {
   sendAppointmentConfirmationEmail,
   sendEmergencySessionEmail,
   sendPasswordResetEmail,
+  sendContactSubmissionNotification,
+  sendAppointmentRequestNotification,
   testEmailConnection,
 };
