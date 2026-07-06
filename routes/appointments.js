@@ -9,6 +9,9 @@ router.use(authenticate);
 // Get appointment types
 router.get('/types', appointmentsController.getAppointmentTypes);
 
+// Stop a recurring appointment series — must be BEFORE /:id wildcard
+router.post('/series/:seriesId/stop', requireRole('admin', 'therapist', 'staff'), appointmentsController.stopAppointmentSeries);
+
 // Get appointments
 router.get('/', appointmentsController.getAppointments);
 

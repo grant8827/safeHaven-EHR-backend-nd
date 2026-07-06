@@ -1,9 +1,9 @@
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { toSnakeAppointment } = require('../utils/transformers');
-const crypto = require('crypto');
-const { v4: uuidv4 } = require('uuid');
 const { redisClient } = require('../utils/redis');
+const { createTelehealthSessionForAppointment } = require('../utils/telehealthSession');
+const { createSeriesAndGenerateAppointments, stopSeries } = require('../utils/recurringAppointments');
 
 // Get all appointments (with filters)
 const getAppointments = asyncHandler(async (req, res) => {
@@ -129,11 +129,12 @@ const createAppointment = asyncHandler(async (req, res) => {
     notes,
     telehealthLink,
     location,
+    repeat,
   } = req.body;
 
   if (!patientId || !therapistId || !startTime) {
-    return res.status(400).json({ 
-      error: 'patientId, therapistId, and startTime are required' 
+    return res.status(400).json({
+      error: 'patientId, therapistId, and startTime are required'
     });
   }
 
@@ -155,6 +156,28 @@ const createAppointment = asyncHandler(async (req, res) => {
 
   // Calculate duration in minutes
   const durationMinutes = duration || Math.round((new Date(calculatedEndTime) - new Date(startTime)) / 60000);
+
+  // Repeat weekly: create a series (this appointment becomes its first
+  // occurrence) and pre-generate the following weeks up to the horizon.
+  if (repeat) {
+    const { series, appointments } = await createSeriesAndGenerateAppointments({
+      patientId,
+      therapistId,
+      createdById: req.user.id,
+      firstOccurrenceStart: new Date(startTime),
+      durationMinutes,
+      type: finalAppointmentType,
+      notes,
+      location,
+    });
+
+    const first = await prisma.appointment.findUnique({ where: { id: appointments[0].id } });
+    return res.status(201).json({
+      ...toSnakeAppointment(first),
+      series_id: series.id,
+      repeat_generated_count: appointments.length,
+    });
+  }
 
   // Create appointment and telehealth session in a transaction if needed
   const result = await prisma.$transaction(async (tx) => {
@@ -199,40 +222,12 @@ const createAppointment = asyncHandler(async (req, res) => {
     // If it's a telehealth appointment, create a session
     let createdSession = null;
     if (isTelehealth) {
-      // The session's own id is what gets embedded in sessionUrl below, so the
-      // "GET /telehealth/sessions/:id" lookup the video page does on load
-      // actually resolves — a separate roomId (used only for the WebRTC room
-      // name) must never be used in that URL.
-      const sessionId = uuidv4();
-      const roomId = crypto.randomBytes(16).toString('hex');
-      const sessionToken = crypto.randomBytes(32).toString('hex');
-      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const sessionUrl = `${baseUrl}/telehealth/session/${sessionId}`;
-
-      createdSession = await tx.telehealthSession.create({
-        data: {
-          id: sessionId,
-          appointmentId: appointment.id,
-          patientId,
-          therapistId,
-          roomId,
-          sessionUrl,
-          sessionToken,
-          status: 'scheduled',
-          scheduledDuration: durationMinutes,
-          platform: 'webrtc',
-          recordingEnabled: true,
-          chatEnabled: true,
-          screenShareEnabled: true,
-          // Pre-create both participants so neither side hits the 403 in
-          // joinSession that's reserved for uninvited, non-staff users.
-          participants: {
-            create: [
-              { userId: therapistId, role: 'therapist', status: 'invited' },
-              { userId: appointment.patient.user.id, role: 'patient', status: 'invited' },
-            ],
-          },
-        },
+      createdSession = await createTelehealthSessionForAppointment(tx, {
+        appointmentId: appointment.id,
+        patientId,
+        therapistId,
+        patientUserId: appointment.patient.user.id,
+        durationMinutes,
       });
     }
 
@@ -329,36 +324,12 @@ const updateAppointment = asyncHandler(async (req, res) => {
     let newSession = null;
     if (isChangingToTelehealth && !appointment.session) {
       const durationMinutes = duration || Math.round((appointment.endTime - appointment.startTime) / 60000);
-      // See createAppointment for why sessionId (not roomId) must be the value
-      // embedded in sessionUrl.
-      const sessionId = uuidv4();
-      const roomId = crypto.randomBytes(16).toString('hex');
-      const sessionToken = crypto.randomBytes(32).toString('hex');
-      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const sessionUrl = `${baseUrl}/telehealth/session/${sessionId}`;
-
-      newSession = await tx.telehealthSession.create({
-        data: {
-          id: sessionId,
-          appointmentId: appointment.id,
-          patientId: appointment.patientId,
-          therapistId: appointment.therapistId,
-          roomId,
-          sessionUrl,
-          sessionToken,
-          status: 'scheduled',
-          scheduledDuration: durationMinutes,
-          platform: 'webrtc',
-          recordingEnabled: true,
-          chatEnabled: true,
-          screenShareEnabled: true,
-          participants: {
-            create: [
-              { userId: appointment.therapistId, role: 'therapist', status: 'invited' },
-              { userId: appointment.patient.user.id, role: 'patient', status: 'invited' },
-            ],
-          },
-        },
+      newSession = await createTelehealthSessionForAppointment(tx, {
+        appointmentId: appointment.id,
+        patientId: appointment.patientId,
+        therapistId: appointment.therapistId,
+        patientUserId: appointment.patient.user.id,
+        durationMinutes,
       });
     }
 
@@ -543,6 +514,24 @@ const getAppointmentTypes = asyncHandler(async (req, res) => {
   return res.json(types);
 });
 
+// Stop a recurring appointment series: marks it inactive and cancels any
+// not-yet-occurred generated appointments (past/in-progress ones are kept).
+const stopAppointmentSeries = asyncHandler(async (req, res) => {
+  const { seriesId } = req.params;
+
+  const existing = await prisma.appointmentSeries.findUnique({ where: { id: seriesId } });
+  if (!existing) {
+    return res.status(404).json({ error: 'Appointment series not found' });
+  }
+
+  const { series, cancelledCount } = await stopSeries(seriesId);
+  return res.json({
+    series_id: series.id,
+    is_active: series.isActive,
+    cancelled_count: cancelledCount,
+  });
+});
+
 module.exports = {
   getAppointments,
   getAppointment,
@@ -553,4 +542,5 @@ module.exports = {
   markNoShow,
   confirmAppointment,
   getAppointmentTypes,
+  stopAppointmentSeries,
 };

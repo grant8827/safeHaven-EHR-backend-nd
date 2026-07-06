@@ -161,6 +161,15 @@ httpServer.listen(PORT, async () => {
     console.log('⚠️  Redis is not configured (REDIS_URL not set)');
   }
 
+  // Keep recurring appointment series populated with future weeks. Runs once
+  // at startup, then daily — a series' horizon only needs to be topped up as
+  // days pass, so this doesn't need to be more frequent than that.
+  const { topUpAllActiveSeries } = require('./utils/recurringAppointments');
+  topUpAllActiveSeries().catch((err) => console.error('[RecurringAppointments] Initial top-up failed:', err));
+  setInterval(() => {
+    topUpAllActiveSeries().catch((err) => console.error('[RecurringAppointments] Scheduled top-up failed:', err));
+  }, 24 * 60 * 60 * 1000);
+
   console.log('');
 });
 

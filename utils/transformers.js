@@ -145,6 +145,8 @@ const toSnakeAppointment = (appointment) => {
     created_by: appointment.createdById,
     created_at: appointment.createdAt,
     updated_at: appointment.updatedAt,
+    series_id: appointment.seriesId || null,
+    is_recurring: !!appointment.seriesId,
   };
 };
 

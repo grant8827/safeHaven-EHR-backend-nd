@@ -111,6 +111,8 @@ model User {
   sessionParticipants TelehealthParticipant[]
   therapistSessions  TelehealthSession[] @relation("sessionTherapist")
   notifications      Notification[]
+  appointmentSeriesAsTherapist AppointmentSeries[] @relation("seriesTherapist")
+  appointmentSeriesCreated     AppointmentSeries[] @relation("seriesCreator")
 
   @@index([role])
   @@index([isActive])
@@ -199,6 +201,7 @@ model Patient {
   soapNotes           SOAPNote[]
   documents           Document[]
   sessions            TelehealthSession[] @relation("patient")
+  appointmentSeries   AppointmentSeries[]
 
   @@index([userId])
   @@index([assignedTherapistId])
@@ -221,7 +224,10 @@ model Appointment {
   notes         String?
   telehealthLink String?
   location      String?
-  
+
+  seriesId      String?
+  series        AppointmentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -233,6 +239,42 @@ model Appointment {
   @@index([therapistId])
   @@index([startTime])
   @@index([status])
+  @@index([seriesId])
+}
+
+// A weekly-repeating appointment definition. Individual Appointment rows are
+// materialized from this (several weeks ahead) rather than computed on the
+// fly, so they behave like any other appointment (reschedulable, cancellable,
+// each with its own telehealth session) without special-casing recurrence
+// everywhere else in the codebase.
+model AppointmentSeries {
+  id              String    @id @default(uuid())
+  patientId       String
+  patient         Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  therapistId     String
+  therapist       User      @relation("seriesTherapist", fields: [therapistId], references: [id], onDelete: Cascade)
+  createdById     String
+  createdBy       User      @relation("seriesCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  dayOfWeek       Int       // 0=Sunday .. 6=Saturday
+  startHour       Int       // wall-clock hour of day (0-23) the appointment starts
+  startMinute     Int       // wall-clock minute (0-59)
+  durationMinutes Int
+  type            AppointmentType
+  location        String?
+  notes           String?
+
+  isActive        Boolean   @default(true) // false once the repeat is stopped
+  horizonWeeks    Int       @default(8)    // how many weeks ahead stay generated
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  appointments    Appointment[]
+
+  @@index([patientId])
+  @@index([therapistId])
+  @@index([isActive])
 }
 
 // SOAP Notes
