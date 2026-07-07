@@ -23,8 +23,6 @@ const getAppointments = asyncHandler(async (req, res) => {
 
   const where = {};
 
-  if (patientId) where.patientId = patientId;
-  if (therapistId) where.therapistId = therapistId;
   if (status) where.status = status;
   if (appointmentType) where.appointmentType = appointmentType;
 
@@ -32,6 +30,24 @@ const getAppointments = asyncHandler(async (req, res) => {
     where.startTime = {};
     if (startDate) where.startTime.gte = new Date(startDate);
     if (endDate) where.startTime.lte = new Date(endDate);
+  }
+
+  // Access control — mirrors patientsController/soapNotesController. Without
+  // this, any authenticated user (including other therapists) could see
+  // every appointment for every patient/therapist in the system.
+  if (req.user.role === 'client') {
+    const patientRecord = await prisma.patient.findFirst({ where: { userId: req.user.id } });
+    if (!patientRecord) {
+      return res.json({ results: [], count: 0, next: null, previous: null });
+    }
+    where.patientId = patientRecord.id;
+  } else if (req.user.role === 'therapist') {
+    where.therapistId = req.user.id;
+    if (patientId) where.patientId = patientId;
+  } else {
+    // admin/staff — honor explicit filters
+    if (patientId) where.patientId = patientId;
+    if (therapistId) where.therapistId = therapistId;
   }
 
   const [appointments, total] = await Promise.all([
@@ -89,7 +105,7 @@ const getAppointment = asyncHandler(async (req, res) => {
               firstName: true,
               lastName: true,
               email: true,
-              phone: true,
+              phoneNumber: true,
             },
           },
         },
@@ -103,13 +119,23 @@ const getAppointment = asyncHandler(async (req, res) => {
         },
       },
       soapNote: true,
-      relatedInvoices: true,
+      invoice: true,
       session: true, // Include telehealth session if exists
     },
   });
 
   if (!appointment) {
     return res.status(404).json({ error: 'Appointment not found' });
+  }
+
+  if (req.user.role === 'therapist' && appointment.therapistId !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  if (req.user.role === 'client') {
+    const patientRecord = await prisma.patient.findFirst({ where: { userId: req.user.id } });
+    if (!patientRecord || appointment.patientId !== patientRecord.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
   }
 
   return res.json(toSnakeAppointment(appointment));

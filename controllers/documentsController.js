@@ -27,6 +27,10 @@ const getDocuments = asyncHandler(async (req, res) => {
     if (patient) {
       where.patientId = patient.id;
     }
+  } else if (userRole === 'therapist') {
+    // Therapists can only see documents for patients assigned to them
+    where.patient = { assignedTherapistId: userId };
+    if (patientId) where.patientId = patientId;
   } else if (patientId) {
     where.patientId = patientId;
   }
@@ -90,33 +94,7 @@ const getDocument = asyncHandler(async (req, res) => {
           },
         },
       },
-      uploadedBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-        },
-      },
-      shares: {
-        include: {
-          sharedWith: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              role: true,
-            },
-          },
-          sharedBy: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
-      },
+      shares: true,
     },
   });
 
@@ -130,6 +108,15 @@ const getDocument = asyncHandler(async (req, res) => {
       where: { userId },
     });
     if (!patient || document.patientId !== patient.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+  if (userRole === 'therapist') {
+    const patient = await prisma.patient.findUnique({
+      where: { id: document.patientId },
+      select: { assignedTherapistId: true },
+    });
+    if (patient?.assignedTherapistId !== userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
   }

@@ -105,6 +105,18 @@ const getInvoices = asyncHandler(async (req, res) => {
       return res.json({ results: cached, count: cached.length, next: null, previous: null });
     }
     where.patientId = patientRecord.id;
+  } else if (userRole === 'therapist') {
+    // Therapists may only see invoices for patients assigned to them.
+    // Not cached via the shared admin cache key below — that cache isn't
+    // scoped per-therapist, so reusing it here would leak between therapists.
+    where.patient = { assignedTherapistId: userId };
+    if (patientId) where.patientId = patientId;
+    if (status) where.status = status;
+    if (startDate || endDate) {
+      where.date = {};
+      if (startDate) where.date.gte = new Date(startDate);
+      if (endDate) where.date.lte = new Date(endDate);
+    }
   } else {
     // Admin/staff path – check cache first
     adminCacheKey = `p${page}:l${limit}:pid${patientId || ''}:s${status || ''}:sd${startDate || ''}:ed${endDate || ''}`;
@@ -220,6 +232,17 @@ const getInvoice = asyncHandler(async (req, res) => {
   if (req.user.role === 'client') {
     const patientRecord = await prisma.patient.findFirst({ where: { userId: req.user.id } });
     if (!patientRecord || patientRecord.id !== invoice.patientId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
+  // Therapist can only view invoices for patients assigned to them
+  if (req.user.role === 'therapist') {
+    const patientRecord = await prisma.patient.findUnique({
+      where: { id: invoice.patientId },
+      select: { assignedTherapistId: true },
+    });
+    if (patientRecord?.assignedTherapistId !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
   }
@@ -640,6 +663,11 @@ const getBillingSummary = asyncHandler(async (req, res) => {
     }
     where.patientId = patientRecord.id;
     summaryKey = `billing:summary:patient:${patientRecord.id}`;
+  } else if (userRole === 'therapist') {
+    // Therapists only get totals for their own assigned patients, not the
+    // system-wide summary.
+    where.patient = { assignedTherapistId: userId };
+    summaryKey = `billing:summary:therapist:${userId}`;
   } else {
     summaryKey = 'billing:summary:admin';
   }

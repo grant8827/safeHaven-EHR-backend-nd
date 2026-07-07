@@ -61,7 +61,9 @@ const getPatients = asyncHandler(async (req, res) => {
     ];
   }
 
-  if (assignedTherapistId) {
+  // Only admin/staff may filter by an arbitrary therapist — a therapist's own
+  // restriction above must never be overridable via this query param.
+  if (assignedTherapistId && req.user.role !== 'therapist' && req.user.role !== 'client') {
     where.assignedTherapistId = assignedTherapistId;
   }
 
