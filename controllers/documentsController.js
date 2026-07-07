@@ -137,6 +137,7 @@ const getDocument = asyncHandler(async (req, res) => {
 const uploadDocument = asyncHandler(async (req, res) => {
   const {
     patientId,
+    title,
     fileName,
     fileUrl,
     fileSize,
@@ -148,14 +149,26 @@ const uploadDocument = asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
   if (!patientId || !fileName || !fileUrl) {
-    return res.status(400).json({ 
-      error: 'patientId, fileName, and fileUrl are required' 
+    return res.status(400).json({
+      error: 'patientId, fileName, and fileUrl are required'
     });
+  }
+
+  // Therapists may only upload documents for patients assigned to them
+  if (req.user.role === 'therapist') {
+    const patient = await prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { assignedTherapistId: true },
+    });
+    if (patient?.assignedTherapistId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
   }
 
   const document = await prisma.document.create({
     data: {
       patientId,
+      title: title || fileName,
       fileName,
       fileUrl,
       fileSize,
@@ -208,8 +221,23 @@ const updateDocument = asyncHandler(async (req, res) => {
     description,
   } = req.body;
 
+  if (req.user.role === 'therapist') {
+    const existing = await prisma.document.findUnique({
+      where: { id },
+      select: { patientId: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Document not found' });
+    const patient = await prisma.patient.findUnique({
+      where: { id: existing.patientId },
+      select: { assignedTherapistId: true },
+    });
+    if (patient?.assignedTherapistId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
   const updateData = {};
-  
+
   if (fileName) updateData.fileName = fileName;
   if (category) updateData.category = category;
   if (description !== undefined) updateData.description = description;
@@ -247,17 +275,34 @@ const deleteDocument = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const userId = req.user.id;
 
-  await prisma.document.delete({
-    where: { id },
-  });
+  if (req.user.role === 'therapist') {
+    const existing = await prisma.document.findUnique({
+      where: { id },
+      select: { patientId: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Document not found' });
+    const patient = await prisma.patient.findUnique({
+      where: { id: existing.patientId },
+      select: { assignedTherapistId: true },
+    });
+    if (patient?.assignedTherapistId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
 
-  // Log deletion
+  // Document.accessHistory cascade-deletes with the document itself, so a
+  // "delete" log row can never actually persist here — best-effort only,
+  // must not block the delete if it fails.
   await prisma.documentAccessLog.create({
     data: {
       documentId: id,
       userId,
       action: 'delete',
     },
+  }).catch((err) => console.error('[Documents] Failed to write delete access log:', err));
+
+  await prisma.document.delete({
+    where: { id },
   });
 
   return res.status(204).send();

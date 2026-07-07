@@ -113,6 +113,8 @@ model User {
   notifications      Notification[]
   appointmentSeriesAsTherapist AppointmentSeries[] @relation("seriesTherapist")
   appointmentSeriesCreated     AppointmentSeries[] @relation("seriesCreator")
+  uploadedDocuments  Document[] @relation("uploadedDocuments")
+  documentAccessLogs DocumentAccessLog[] @relation("documentAccessLogs")
 
   @@index([role])
   @@index([isActive])
@@ -448,12 +450,15 @@ model Document {
   fileName      String?
   fileSize      Int?
   mimeType      String?
-  
+
   isEncrypted   Boolean @default(false)
   signature     String?
   signatureDate DateTime?
   isSigned      Boolean @default(false)
-  
+
+  uploadedById  String?
+  uploadedBy    User?    @relation("uploadedDocuments", fields: [uploadedById], references: [id], onDelete: SetNull)
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -483,11 +488,15 @@ model DocumentAccessLog {
   id            String   @id @default(uuid())
   documentId    String
   document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  
+
+  userId        String?
+  user          User?    @relation("documentAccessLogs", fields: [userId], references: [id], onDelete: SetNull)
+
   accessedAt    DateTime @default(now())
   action        String   // viewed, downloaded, printed, shared
 
   @@index([documentId])
+  @@index([userId])
 }
 
 // Telehealth
