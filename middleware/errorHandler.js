@@ -29,6 +29,11 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
+  // CORS rejections
+  if (typeof err.message === 'string' && err.message.startsWith('Not allowed by CORS')) {
+    return res.status(403).json({ error: err.message });
+  }
+
   // Default error — never leak internal messages to clients in production
   const isProd = process.env.NODE_ENV === 'production';
   res.status(err.status || 500).json({

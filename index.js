@@ -17,16 +17,37 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 
 // CORS Configuration
-const corsOrigins = process.env.CORS_ORIGIN 
-  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
-  : [];
+const parseOrigins = (value = '') => value
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+const corsOrigins = parseOrigins(process.env.CORS_ORIGIN || '');
+const frontendOrigin = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
 
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
-  ...corsOrigins
+  'https://safehavenrestorationministries.com',
+  'https://www.safehavenrestorationministries.com',
+  frontendOrigin,
+  ...corsOrigins,
 ].filter(Boolean);
+
+const uniqueAllowedOrigins = [...new Set(allowedOrigins)];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    const normalizedOrigin = origin ? origin.replace(/\/$/, '') : origin;
+    if (!normalizedOrigin || uniqueAllowedOrigins.includes(normalizedOrigin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`Not allowed by CORS: ${normalizedOrigin}`));
+  },
+  credentials: true,
+};
 
 // Security headers via Helmet
 // contentSecurityPolicy disabled here — managed by the frontend static server.
@@ -39,16 +60,11 @@ app.use(helmet({
 app.use('/api', generalLimiter);
 
 // Middleware
-app.use(cors({ 
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true 
-}));
+// Note: app.use(cors(...)) alone already handles OPTIONS preflight for every
+// route — an explicit app.options('*', ...) is both redundant and, on
+// Express 5's path-to-regexp, an invalid bare wildcard route (crashes on
+// startup: "Missing parameter name at index 1: *").
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 
@@ -125,11 +141,8 @@ app.use((req, res) => {
 const httpServer = http.createServer(app);
 
 const allowedOriginsForSignaling = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:5173',
-  ...corsOrigins,
-].filter(Boolean);
+  ...uniqueAllowedOrigins,
+];
 
 const io = createSignalingServer(httpServer, allowedOriginsForSignaling);
 
@@ -143,6 +156,7 @@ app.set('io', io);
 httpServer.listen(PORT, async () => {
   console.log(`Backend listening on port ${PORT}`);
   console.log(`🔌 Socket.io signaling server ready on port ${PORT}`);
+  console.log('🌐 Allowed CORS origins:', uniqueAllowedOrigins);
 
   // Test email configuration on startup
   console.log('\n📧 Testing email service...');
@@ -161,14 +175,15 @@ httpServer.listen(PORT, async () => {
     console.log('⚠️  Redis is not configured (REDIS_URL not set)');
   }
 
-  // Keep recurring appointment series populated with future weeks. Runs once
-  // at startup, then daily — a series' horizon only needs to be topped up as
-  // days pass, so this doesn't need to be more frequent than that.
+  // Keep recurring appointment series populated with exactly one upcoming
+  // occurrence each. Runs once at startup, then hourly, so the next
+  // occurrence appears fairly promptly once the current one passes (or is
+  // cancelled) rather than waiting up to a full day.
   const { topUpAllActiveSeries } = require('./utils/recurringAppointments');
   topUpAllActiveSeries().catch((err) => console.error('[RecurringAppointments] Initial top-up failed:', err));
   setInterval(() => {
     topUpAllActiveSeries().catch((err) => console.error('[RecurringAppointments] Scheduled top-up failed:', err));
-  }, 24 * 60 * 60 * 1000);
+  }, 60 * 60 * 1000);
 
   console.log('');
 });

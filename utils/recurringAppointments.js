@@ -67,10 +67,9 @@ async function createOneOccurrence(tx, series, occurrenceStart) {
 
 /**
  * Creates a new AppointmentSeries starting from an already-chosen first
- * occurrence, then immediately generates that occurrence plus
- * `horizonWeeks - 1` more weekly ones after it — so the series shows up
- * `horizonWeeks` out on the calendar right away instead of appearing one
- * week at a time.
+ * occurrence, and generates just that one occurrence. Only one upcoming
+ * occurrence ever exists for a series at a time — see topUpSeries, which
+ * generates the next one once this one has passed (or been cancelled).
  */
 async function createSeriesAndGenerateAppointments({
   patientId,
@@ -81,7 +80,6 @@ async function createSeriesAndGenerateAppointments({
   type,
   notes,
   location,
-  horizonWeeks = 8,
 }) {
   const series = await prisma.appointmentSeries.create({
     data: {
@@ -95,43 +93,32 @@ async function createSeriesAndGenerateAppointments({
       type,
       notes,
       location,
-      horizonWeeks,
     },
   });
 
-  const appointments = [];
-  for (let week = 0; week < horizonWeeks; week += 1) {
-    const occurrenceStart = new Date(firstOccurrenceStart.getTime() + week * WEEK_MS);
-    // eslint-disable-next-line no-await-in-loop
-    const appointment = await prisma.$transaction((tx) => createOneOccurrence(tx, series, occurrenceStart));
-    appointments.push(appointment);
-  }
+  const appointment = await prisma.$transaction((tx) => createOneOccurrence(tx, series, firstOccurrenceStart));
 
-  return { series, appointments };
+  return { series, appointments: [appointment] };
 }
 
-// Ensures an active series has appointments generated through `horizonWeeks`
-// from today. Call periodically (see index.js) so series created a while
-// ago keep having future weeks populated as time moves forward.
+// Ensures an active series has exactly one upcoming occurrence (scheduled,
+// not yet passed). Call periodically (see index.js): once the current
+// occurrence's start time passes, or it's cancelled, this generates the
+// next one — computed fresh from "now", not from the old one's date — to
+// replace it.
 async function topUpSeries(series) {
-  const latest = await prisma.appointment.findFirst({
-    where: { seriesId: series.id },
-    orderBy: { startTime: 'desc' },
+  const hasUpcoming = await prisma.appointment.findFirst({
+    where: {
+      seriesId: series.id,
+      status: 'scheduled',
+      startTime: { gt: new Date() },
+    },
   });
+  if (hasUpcoming) return [];
 
-  const horizonDate = new Date(Date.now() + series.horizonWeeks * WEEK_MS);
-  let nextStart = latest
-    ? new Date(latest.startTime.getTime() + WEEK_MS)
-    : nextOccurrenceOnOrAfter(new Date(), series.dayOfWeek, series.startHour, series.startMinute);
-
-  const created = [];
-  while (nextStart <= horizonDate) {
-    // eslint-disable-next-line no-await-in-loop
-    const appointment = await prisma.$transaction((tx) => createOneOccurrence(tx, series, nextStart));
-    created.push(appointment);
-    nextStart = new Date(nextStart.getTime() + WEEK_MS);
-  }
-  return created;
+  const nextStart = nextOccurrenceOnOrAfter(new Date(), series.dayOfWeek, series.startHour, series.startMinute);
+  const appointment = await prisma.$transaction((tx) => createOneOccurrence(tx, series, nextStart));
+  return [appointment];
 }
 
 async function topUpAllActiveSeries() {

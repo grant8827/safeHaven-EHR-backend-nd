@@ -184,7 +184,8 @@ const createAppointment = asyncHandler(async (req, res) => {
   const durationMinutes = duration || Math.round((new Date(calculatedEndTime) - new Date(startTime)) / 60000);
 
   // Repeat weekly: create a series (this appointment becomes its first
-  // occurrence) and pre-generate the following weeks up to the horizon.
+  // occurrence). Only this one occurrence is generated — the next one is
+  // generated to replace it once its date passes (see topUpAllActiveSeries).
   if (repeat) {
     const { series, appointments } = await createSeriesAndGenerateAppointments({
       patientId,
@@ -201,7 +202,7 @@ const createAppointment = asyncHandler(async (req, res) => {
     return res.status(201).json({
       ...toSnakeAppointment(first),
       series_id: series.id,
-      repeat_generated_count: appointments.length,
+      is_recurring: true,
     });
   }
 
