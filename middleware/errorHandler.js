@@ -34,6 +34,14 @@ const errorHandler = (err, req, res, next) => {
     return res.status(403).json({ error: err.message });
   }
 
+  // Multer upload errors (e.g. file too large)
+  if (err.name === 'MulterError') {
+    const messages = {
+      LIMIT_FILE_SIZE: 'File is too large',
+    };
+    return res.status(400).json({ error: messages[err.code] || `Upload error: ${err.code}` });
+  }
+
   // Default error — never leak internal messages to clients in production
   const isProd = process.env.NODE_ENV === 'production';
   res.status(err.status || 500).json({

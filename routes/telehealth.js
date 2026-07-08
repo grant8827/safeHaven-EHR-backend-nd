@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole } = require('../middleware/auth');
 const telehealthController = require('../controllers/telehealthController');
+const { recordingUpload } = require('../utils/recordingStorage');
 
 // All routes require authentication
 router.use(authenticate);
@@ -29,7 +30,13 @@ router.post('/sessions/:id/join', telehealthController.joinSession);
 router.post('/sessions/:id/leave', telehealthController.leaveSession);
 
 // Recordings and transcripts
-router.post('/recordings', requireRole('admin', 'therapist', 'staff'), telehealthController.saveRecording);
+router.post(
+  '/recordings',
+  requireRole('admin', 'therapist', 'staff'),
+  recordingUpload.single('recording'),
+  telehealthController.saveRecording
+);
+router.get('/recordings/:id/download', telehealthController.downloadRecording);
 router.post('/transcripts', telehealthController.saveTranscript);
 
 // Presence (Redis-backed user online status for Waiting Room)

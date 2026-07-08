@@ -1,8 +1,11 @@
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { v4: uuidv4 } = require('uuid');
 const { presenceHelpers, telehealthSessionHelpers, redisClient } = require('../utils/redis');
 const { sendEmergencySessionEmail } = require('../utils/emailService');
+const { RECORDINGS_DIR } = require('../utils/recordingStorage');
 
 // Get telehealth sessions
 const getSessions = asyncHandler(async (req, res) => {
@@ -624,42 +627,85 @@ const leaveSession = asyncHandler(async (req, res) => {
   return res.json(updatedParticipant);
 });
 
-// Save recording metadata
+// Save recording — expects multipart/form-data: file field "recording" +
+// text fields sessionId, duration (seconds). The video file itself is
+// written to disk by the recordingUpload multer middleware before this runs;
+// req.file holds its saved name/size/mimetype.
 const saveRecording = asyncHandler(async (req, res) => {
-  const { sessionId, fileUrl, fileSize, duration, storageProvider } = req.body;
+  const { sessionId, duration } = req.body;
+  const file = req.file;
 
-  if (!sessionId || !fileUrl) {
-    return res.status(400).json({ error: 'sessionId and fileUrl are required' });
+  if (!sessionId || !file) {
+    return res.status(400).json({ error: 'sessionId and a recording file are required' });
   }
 
+  const session = await prisma.telehealthSession.findUnique({ where: { id: sessionId } });
+  if (!session) {
+    fs.unlink(file.path, () => {});
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  // Therapists may only attach a recording to their own session
+  if (req.user.role === 'therapist' && session.therapistId !== req.user.id) {
+    fs.unlink(file.path, () => {});
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const recordingId = uuidv4();
   const recording = await prisma.recordingMetadata.create({
     data: {
+      id: recordingId,
       sessionId,
-      fileUrl,
-      fileSize,
-      duration,
-      storageProvider,
-    },
-    include: {
-      session: {
-        include: {
-          participants: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                },
-              },
-            },
-          },
-        },
-      },
+      fileName: file.filename,
+      fileSize: file.size,
+      duration: duration ? parseInt(duration, 10) : 0,
+      mimeType: file.mimetype,
+      downloadUrl: `/api/telehealth/recordings/${recordingId}/download`,
     },
   });
 
   return res.status(201).json(recording);
+});
+
+// Stream a saved recording back — access restricted to the session's
+// therapist, its patient, or admin/staff.
+const downloadRecording = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const recording = await prisma.recordingMetadata.findUnique({
+    where: { id },
+    include: { session: true },
+  });
+  if (!recording) {
+    return res.status(404).json({ error: 'Recording not found' });
+  }
+
+  const { session } = recording;
+  const userRole = req.user.role;
+  const userId = req.user.id;
+
+  if (!['admin', 'staff'].includes(userRole)) {
+    if (userRole === 'therapist' && session.therapistId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (userRole === 'client') {
+      const patientRecord = await prisma.patient.findFirst({ where: { userId } });
+      if (!patientRecord || patientRecord.id !== session.patientId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+  }
+
+  const filePath = path.join(RECORDINGS_DIR, recording.fileName);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({
+      error: 'Recording file is not available on the server (it may have been lost during a redeploy — local storage is ephemeral without a mounted volume)',
+    });
+  }
+
+  res.setHeader('Content-Type', recording.mimeType);
+  res.setHeader('Content-Disposition', `inline; filename="${recording.fileName}"`);
+  fs.createReadStream(filePath).pipe(res);
 });
 
 // Save transcript (entries = [{ speakerName, speakerRole, text, timestamp }])
@@ -997,6 +1043,7 @@ module.exports = {
   joinSession,
   leaveSession,
   saveRecording,
+  downloadRecording,
   saveTranscript,
   getTranscripts,
   getUserPresence,
