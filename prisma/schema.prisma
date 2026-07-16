@@ -226,10 +226,11 @@ model Appointment {
   notes         String?
   telehealthLink String?
   location      String?
-
   seriesId      String?
   series        AppointmentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-
+  isRecurring   Boolean             @default(false)
+  recurrenceIntervalWeeks Int       @default(1)
+  recurrenceEndDate DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -242,41 +243,34 @@ model Appointment {
   @@index([startTime])
   @@index([status])
   @@index([seriesId])
+  @@index([patientId, therapistId, isRecurring])
 }
 
-// A weekly-repeating appointment definition. Individual Appointment rows are
-// materialized from this (several weeks ahead) rather than computed on the
-// fly, so they behave like any other appointment (reschedulable, cancellable,
-// each with its own telehealth session) without special-casing recurrence
-// everywhere else in the codebase.
+// A weekly-repeating appointment definition retained for existing series.
 model AppointmentSeries {
-  id              String    @id @default(uuid())
+  id              String          @id @default(uuid())
   patientId       String
-  patient         Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient         Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
   therapistId     String
-  therapist       User      @relation("seriesTherapist", fields: [therapistId], references: [id], onDelete: Cascade)
+  therapist       User            @relation("seriesTherapist", fields: [therapistId], references: [id], onDelete: Cascade)
   createdById     String
-  createdBy       User      @relation("seriesCreator", fields: [createdById], references: [id], onDelete: SetNull)
-
-  dayOfWeek       Int       // 0=Sunday .. 6=Saturday
-  startHour       Int       // wall-clock hour of day (0-23) the appointment starts
-  startMinute     Int       // wall-clock minute (0-59)
+  createdBy       User            @relation("seriesCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  dayOfWeek       Int
+  startHour       Int
+  startMinute     Int
   durationMinutes Int
   type            AppointmentType
   location        String?
   notes           String?
-
-  isActive        Boolean   @default(true) // false once the repeat is stopped
-  horizonWeeks    Int       @default(8)    // how many weeks ahead stay generated
-
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
+  isActive        Boolean         @default(true)
+  horizonWeeks    Int             @default(8)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   appointments    Appointment[]
 
+  @@index([isActive])
   @@index([patientId])
   @@index([therapistId])
-  @@index([isActive])
 }
 
 // SOAP Notes

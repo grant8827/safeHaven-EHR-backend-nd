@@ -3,7 +3,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { toSnakeAppointment } = require('../utils/transformers');
 const { redisClient } = require('../utils/redis');
 const { createTelehealthSessionForAppointment } = require('../utils/telehealthSession');
-const { createSeriesAndGenerateAppointments, stopSeries } = require('../utils/recurringAppointments');
+const { stopSeries } = require('../utils/recurringAppointments');
 
 // Get all appointments (with filters)
 const getAppointments = asyncHandler(async (req, res) => {
@@ -156,6 +156,9 @@ const createAppointment = asyncHandler(async (req, res) => {
     telehealthLink,
     location,
     repeat,
+    isRecurring = false,
+    recurrenceIntervalWeeks = 1,
+    recurrenceEndDate,
   } = req.body;
 
   if (!patientId || !therapistId || !startTime) {
@@ -183,27 +186,19 @@ const createAppointment = asyncHandler(async (req, res) => {
   // Calculate duration in minutes
   const durationMinutes = duration || Math.round((new Date(calculatedEndTime) - new Date(startTime)) / 60000);
 
-  // Repeat weekly: create a series (this appointment becomes its first
-  // occurrence). Only this one occurrence is generated — the next one is
-  // generated to replace it once its date passes (see topUpAllActiveSeries).
-  if (repeat) {
-    const { series, appointments } = await createSeriesAndGenerateAppointments({
-      patientId,
-      therapistId,
-      createdById: req.user.id,
-      firstOccurrenceStart: new Date(startTime),
-      durationMinutes,
-      type: finalAppointmentType,
-      notes,
-      location,
+  const shouldRepeat = Boolean(repeat || isRecurring);
+  if (shouldRepeat) {
+    const existingRecurring = await prisma.appointment.findFirst({
+      where: {
+        patientId,
+        therapistId,
+        OR: [{ isRecurring: true }, { seriesId: { not: null } }],
+        status: { in: ['scheduled', 'confirmed', 'in_progress'] },
+      },
     });
-
-    const first = await prisma.appointment.findUnique({ where: { id: appointments[0].id } });
-    return res.status(201).json({
-      ...toSnakeAppointment(first),
-      series_id: series.id,
-      is_recurring: true,
-    });
+    if (existingRecurring) {
+      return res.status(409).json({ error: 'This client already has a current recurring appointment with this therapist' });
+    }
   }
 
   // Create appointment and telehealth session in a transaction if needed
@@ -221,6 +216,9 @@ const createAppointment = asyncHandler(async (req, res) => {
         notes,
         telehealthLink,
         location,
+        isRecurring: shouldRepeat,
+        recurrenceIntervalWeeks: Math.max(1, parseInt(recurrenceIntervalWeeks, 10) || 1),
+        recurrenceEndDate: recurrenceEndDate ? new Date(recurrenceEndDate) : null,
       },
       include: {
         patient: {
@@ -292,6 +290,9 @@ const updateAppointment = asyncHandler(async (req, res) => {
     location,
     noShowReason,
     cancelledBy,
+    isRecurring,
+    recurrenceIntervalWeeks,
+    recurrenceEndDate,
   } = req.body;
 
   const updateData = {};
@@ -312,6 +313,30 @@ const updateAppointment = asyncHandler(async (req, res) => {
   if (location !== undefined) updateData.location = location;
   if (noShowReason !== undefined) updateData.noShowReason = noShowReason;
   if (cancelledBy !== undefined) updateData.cancelledBy = cancelledBy;
+  if (isRecurring !== undefined) updateData.isRecurring = Boolean(isRecurring);
+  if (recurrenceIntervalWeeks !== undefined) {
+    updateData.recurrenceIntervalWeeks = Math.max(1, parseInt(recurrenceIntervalWeeks, 10) || 1);
+  }
+  if (recurrenceEndDate !== undefined) {
+    updateData.recurrenceEndDate = recurrenceEndDate ? new Date(recurrenceEndDate) : null;
+  }
+
+  if (isRecurring === true) {
+    const current = await prisma.appointment.findUnique({ where: { id } });
+    if (!current) return res.status(404).json({ error: 'Appointment not found' });
+    const existingRecurring = await prisma.appointment.findFirst({
+      where: {
+        id: { not: id },
+        patientId: current.patientId,
+        therapistId: current.therapistId,
+        OR: [{ isRecurring: true }, { seriesId: { not: null } }],
+        status: { in: ['scheduled', 'confirmed', 'in_progress'] },
+      },
+    });
+    if (existingRecurring) {
+      return res.status(409).json({ error: 'This client already has a current recurring appointment with this therapist' });
+    }
+  }
 
   // Check if the appointment is being changed to telehealth
   const finalType = type || appointmentType;

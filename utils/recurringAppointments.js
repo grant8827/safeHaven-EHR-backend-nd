@@ -111,7 +111,6 @@ async function topUpSeries(series) {
     where: {
       seriesId: series.id,
       status: 'scheduled',
-      startTime: { gt: new Date() },
     },
   });
   if (hasUpcoming) return [];

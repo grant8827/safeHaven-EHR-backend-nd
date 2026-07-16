@@ -9,7 +9,7 @@
   },
   "scripts": {
     "postinstall": "npx prisma generate",
-    "start": "npx prisma db push --accept-data-loss && node seed_templates.js && node index.js",
+    "start": "npx prisma db push && node seed_templates.js && node index.js",
     "dev": "nodemon index.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

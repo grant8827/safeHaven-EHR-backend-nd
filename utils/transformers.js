@@ -139,14 +139,16 @@ const toSnakeAppointment = (appointment) => {
     appointment_type: appointment.type,
     status: appointment.status,
     notes: appointment.notes || '',
-    is_telehealth: !!appointment.telehealthLink,
+    is_telehealth: appointment.type === 'telehealth' || !!appointment.telehealthLink,
     telehealth_link: appointment.telehealthLink || null,
     location: appointment.location || '',
+    is_recurring: Boolean(appointment.isRecurring || appointment.seriesId),
+    recurrence_interval_weeks: appointment.recurrenceIntervalWeeks || 1,
+    recurrence_end_date: appointment.recurrenceEndDate || null,
     created_by: appointment.createdById,
     created_at: appointment.createdAt,
     updated_at: appointment.updatedAt,
     series_id: appointment.seriesId || null,
-    is_recurring: !!appointment.seriesId,
   };
 };
 

@@ -133,7 +133,7 @@ const toggleSlot = asyncHandler(async (req, res) => {
  * Admin / staff only. Atomically books an available slot and creates an Appointment row.
  */
 const bookSlot = asyncHandler(async (req, res) => {
-  const { therapistId, date, slot, patientId, type, notes } = req.body;
+  const { therapistId, date, slot, patientId, type, notes, isRecurring = false } = req.body;
   const requesterId = req.user.id;
 
   if (!therapistId || !date || !slot || !patientId || !type) {
@@ -162,6 +162,22 @@ const bookSlot = asyncHandler(async (req, res) => {
   const endTime = new Date(startTime);
   endTime.setMinutes(endTime.getMinutes() + 50); // 50-minute sessions
 
+  if (isRecurring) {
+    const existingRecurring = await prisma.appointment.findFirst({
+      where: {
+        patientId,
+        therapistId,
+        isRecurring: true,
+        status: { in: ['scheduled', 'confirmed', 'in_progress'] },
+      },
+    });
+    if (existingRecurring) {
+      return res.status(409).json({
+        error: 'This client already has a current recurring appointment with this therapist',
+      });
+    }
+  }
+
   // Atomic CAS in Redis: slot must be "1" to proceed
   const booked = await scheduleHelpers.atomicBook(therapistId, date, slot);
   if (!booked) {
@@ -180,9 +196,16 @@ const bookSlot = asyncHandler(async (req, res) => {
         createdById: requesterId,
         startTime,
         endTime,
-        type,
+        type: ({
+          initial: 'initial_consultation',
+          'follow-up': 'follow_up',
+          group: 'group_therapy',
+          assessment: 'assessment',
+          emergency: 'therapy_session',
+        })[type] || type,
         status: 'scheduled',
         notes: notes || null,
+        isRecurring: Boolean(isRecurring),
       },
       include: {
         patient: {

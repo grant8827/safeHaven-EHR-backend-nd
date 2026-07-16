@@ -3,7 +3,7 @@ const path = require('path');
 const prisma = require('../utils/prisma');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { v4: uuidv4 } = require('uuid');
-const { presenceHelpers, telehealthSessionHelpers, redisClient } = require('../utils/redis');
+const { presenceHelpers, telehealthSessionHelpers, scheduleHelpers, redisClient } = require('../utils/redis');
 const { sendEmergencySessionEmail } = require('../utils/emailService');
 const { RECORDINGS_DIR } = require('../utils/recordingStorage');
 
@@ -141,6 +141,7 @@ const getSessions = asyncHandler(async (req, res) => {
       appointment_id: session.appointmentId,
       title: session.appointmentId ? 'Telehealth Appointment' : 'Emergency Session',
       is_emergency: !session.appointmentId,
+      is_recurring: Boolean(session.appointment?.isRecurring || session.appointment?.seriesId),
       has_recording: session.recordings && session.recordings.length > 0,
       has_transcript: session.transcripts && session.transcripts.length > 0,
       recording_enabled: session.recordingEnabled,
@@ -260,6 +261,7 @@ const getSession = asyncHandler(async (req, res) => {
     appointment_id: session.appointmentId,
     title: session.appointmentId ? 'Telehealth Appointment' : 'Emergency Session',
     is_emergency: !session.appointmentId,
+    is_recurring: Boolean(session.appointment?.isRecurring || session.appointment?.seriesId),
     has_recording: session.recordings && session.recordings.length > 0,
     has_transcript: session.transcripts && session.transcripts.length > 0,
     recording_enabled: session.recordingEnabled,
@@ -400,10 +402,10 @@ const startSession = asyncHandler(async (req, res) => {
 // End session
 const endSession = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { notes } = req.body;
 
   const session = await prisma.telehealthSession.findUnique({
     where: { id },
+    include: { appointment: { include: { series: true } } },
   });
 
   if (!session) {
@@ -414,27 +416,121 @@ const endSession = asyncHandler(async (req, res) => {
     ? Math.floor((new Date() - session.startedAt) / 1000 / 60)
     : 0;
 
-  const updatedSession = await prisma.telehealthSession.update({
-    where: { id },
-    data: {
-      status: 'completed',
-      endedAt: new Date(),
-      actualDuration,
-    },
-    include: {
-      participants: {
+  const now = new Date();
+  let rolledSchedule = null;
+
+  const updatedSession = await prisma.$transaction(async (tx) => {
+    // Scheduled telehealth appointments are recurring weekly. Reuse the same
+    // Appointment and TelehealthSession rows so the schedule pages contain one
+    // current occurrence instead of accumulating a new row after every visit.
+    const isRecurringAppointment = session.appointment && (
+      session.appointment.isRecurring ||
+      (session.appointment.seriesId && session.appointment.series?.isActive !== false)
+    );
+    if (isRecurringAppointment) {
+      const nextStart = new Date(session.appointment.startTime);
+      const durationMs = session.appointment.endTime - session.appointment.startTime;
+      const intervalDays = Math.max(1, session.appointment.recurrenceIntervalWeeks || 1) * 7;
+
+      do {
+        nextStart.setDate(nextStart.getDate() + intervalDays);
+      } while (nextStart <= now);
+
+      if (session.appointment.recurrenceEndDate && nextStart > session.appointment.recurrenceEndDate) {
+        await tx.appointment.update({
+          where: { id: session.appointmentId },
+          data: { status: 'completed' },
+        });
+        return tx.telehealthSession.update({
+          where: { id },
+          data: { status: 'ended', endedAt: now, actualDuration },
+          include: { appointment: true, participants: { include: { user: true } } },
+        });
+      }
+
+      const nextEnd = new Date(nextStart.getTime() + durationMs);
+      rolledSchedule = {
+        therapistId: session.appointment.therapistId,
+        previousStart: session.appointment.startTime,
+        nextStart,
+      };
+
+      await tx.appointment.update({
+        where: { id: session.appointmentId },
+        data: {
+          startTime: nextStart,
+          endTime: nextEnd,
+          status: 'scheduled',
+          isRecurring: true,
+        },
+      });
+
+      await tx.telehealthParticipant.updateMany({
+        where: { sessionId: id },
+        data: { status: 'waiting', joinedAt: null, leftAt: null },
+      });
+
+      return tx.telehealthSession.update({
+        where: { id },
+        data: {
+          status: 'scheduled',
+          startedAt: null,
+          endedAt: null,
+          actualDuration,
+        },
         include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
+          appointment: true,
+          participants: {
+            include: {
+              user: {
+                select: { id: true, firstName: true, lastName: true },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    if (session.appointment) {
+      await tx.appointment.update({
+        where: { id: session.appointmentId },
+        data: { status: 'completed' },
+      });
+    }
+
+    // One-time and emergency sessions end without creating another row.
+    return tx.telehealthSession.update({
+      where: { id },
+      data: { status: 'ended', endedAt: now, actualDuration },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: { id: true, firstName: true, lastName: true },
             },
           },
         },
       },
-    },
+    });
   });
+
+  if (redisClient) {
+    await redisClient.del(`telehealth:session:${id}:status`).catch(() => {});
+
+    // Keep the Redis-backed Schedule page aligned with the reused DB row.
+    if (rolledSchedule) {
+      const slotParts = (date) => ({
+        date: date.toISOString().slice(0, 10),
+        slot: `${String(date.getUTCHours()).padStart(2, '0')}${String(date.getUTCMinutes()).padStart(2, '0')}`,
+      });
+      const previous = slotParts(new Date(rolledSchedule.previousStart));
+      const next = slotParts(new Date(rolledSchedule.nextStart));
+      await Promise.all([
+        scheduleHelpers.setSlot(rolledSchedule.therapistId, previous.date, previous.slot, '1'),
+        scheduleHelpers.setSlot(rolledSchedule.therapistId, next.date, next.slot, '2'),
+      ]).catch((err) => console.error('[Redis] Failed to roll schedule slot forward:', err));
+    }
+  }
 
   return res.json(updatedSession);
 });
@@ -721,15 +817,21 @@ const saveTranscript = asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Session not found' });
   }
 
-  // Allow therapist, admin, staff, or any participant in this session
+  // Allow therapist, admin, staff, session patient, or any explicit participant
   const userId = req.user.id;
   const userRole = req.user.role;
   if (!['admin', 'staff'].includes(userRole) && session.therapistId !== userId) {
+    // Check explicit participant row first (fastest path)
     const participant = await prisma.telehealthParticipant.findFirst({
       where: { sessionId, userId },
     });
     if (!participant) {
-      return res.status(403).json({ error: 'You are not a participant in this session' });
+      // Patients are rarely added to TelehealthParticipant for regular sessions —
+      // allow them by matching the session's patientId via the Patient → User link.
+      const patientRecord = await prisma.patient.findFirst({ where: { userId } });
+      if (!patientRecord || session.patientId !== patientRecord.id) {
+        return res.status(403).json({ error: 'You are not authorized to save transcript for this session' });
+      }
     }
   }
 
