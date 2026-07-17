@@ -170,6 +170,7 @@ const bookSlot = asyncHandler(async (req, res) => {
         therapistId,
         OR: [{ isRecurring: true }, { seriesId: { not: null } }],
         status: { in: ['scheduled', 'confirmed', 'in_progress'] },
+        endTime: { gte: new Date() },
       },
     });
   }

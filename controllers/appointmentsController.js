@@ -195,6 +195,7 @@ const createAppointment = asyncHandler(async (req, res) => {
         therapistId,
         OR: [{ isRecurring: true }, { seriesId: { not: null } }],
         status: { in: ['scheduled', 'confirmed', 'in_progress'] },
+        endTime: { gte: new Date() },
       },
     });
   }
@@ -340,6 +341,7 @@ const updateAppointment = asyncHandler(async (req, res) => {
         therapistId: current.therapistId,
         OR: [{ isRecurring: true }, { seriesId: { not: null } }],
         status: { in: ['scheduled', 'confirmed', 'in_progress'] },
+        endTime: { gte: new Date() },
       },
     });
     if (existingRecurring) {
