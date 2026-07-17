@@ -187,8 +187,9 @@ const createAppointment = asyncHandler(async (req, res) => {
   const durationMinutes = duration || Math.round((new Date(calculatedEndTime) - new Date(startTime)) / 60000);
 
   const shouldRepeat = Boolean(repeat || isRecurring);
+  let existingRecurring = null;
   if (shouldRepeat) {
-    const existingRecurring = await prisma.appointment.findFirst({
+    existingRecurring = await prisma.appointment.findFirst({
       where: {
         patientId,
         therapistId,
@@ -196,58 +197,63 @@ const createAppointment = asyncHandler(async (req, res) => {
         status: { in: ['scheduled', 'confirmed', 'in_progress'] },
       },
     });
-    if (existingRecurring) {
-      return res.status(409).json({ error: 'This client already has a current recurring appointment with this therapist' });
-    }
   }
 
-  // Create appointment and telehealth session in a transaction if needed
+  // Repeated bookings are upserts: reuse the current appointment/session rows.
   const result = await prisma.$transaction(async (tx) => {
-    // Create the appointment
-    const appointment = await tx.appointment.create({
-      data: {
-        patientId,
-        therapistId,
-        createdById: req.user.id,
-        startTime: new Date(startTime),
-        endTime: new Date(calculatedEndTime),
-        type: finalAppointmentType,
-        status: status || 'scheduled',
-        notes,
-        telehealthLink,
-        location,
-        isRecurring: shouldRepeat,
-        recurrenceIntervalWeeks: Math.max(1, parseInt(recurrenceIntervalWeeks, 10) || 1),
-        recurrenceEndDate: recurrenceEndDate ? new Date(recurrenceEndDate) : null,
-      },
-      include: {
-        patient: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
-          },
-        },
-        therapist: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
+    const appointmentData = {
+      patientId,
+      therapistId,
+      startTime: new Date(startTime),
+      endTime: new Date(calculatedEndTime),
+      type: finalAppointmentType,
+      status: status || 'scheduled',
+      notes,
+      telehealthLink,
+      location,
+      isRecurring: shouldRepeat,
+      recurrenceIntervalWeeks: Math.max(1, parseInt(recurrenceIntervalWeeks, 10) || 1),
+      recurrenceEndDate: recurrenceEndDate ? new Date(recurrenceEndDate) : null,
+    };
+    const include = {
+      patient: {
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, email: true } },
         },
       },
-    });
+      therapist: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+      session: true,
+    };
+    const appointment = existingRecurring
+      ? await tx.appointment.update({
+          where: { id: existingRecurring.id },
+          data: appointmentData,
+          include,
+        })
+      : await tx.appointment.create({
+          data: { ...appointmentData, createdById: req.user.id },
+          include,
+        });
 
-    // If it's a telehealth appointment, create a session
-    let createdSession = null;
-    if (isTelehealth) {
-      createdSession = await createTelehealthSessionForAppointment(tx, {
+    let scheduledSession = null;
+    if (isTelehealth && appointment.session) {
+      scheduledSession = await tx.telehealthSession.update({
+        where: { id: appointment.session.id },
+        data: {
+          status: 'scheduled',
+          startedAt: null,
+          endedAt: null,
+          scheduledDuration: durationMinutes,
+        },
+      });
+      await tx.telehealthParticipant.updateMany({
+        where: { sessionId: appointment.session.id },
+        data: { status: 'invited', joinedAt: null, leftAt: null },
+      });
+    } else if (isTelehealth) {
+      scheduledSession = await createTelehealthSessionForAppointment(tx, {
         appointmentId: appointment.id,
         patientId,
         therapistId,
@@ -256,23 +262,26 @@ const createAppointment = asyncHandler(async (req, res) => {
       });
     }
 
-    return { appointment, createdSession };
+    return { appointment, scheduledSession };
   });
 
   // Cache sessionId in Redis keyed by appointmentId, TTL = appointment duration
-  if (result.createdSession) {
+  if (result.scheduledSession) {
     const ttlSeconds = durationMinutes * 60;
     if (redisClient) {
       await redisClient.set(
         `telehealth:appt:${result.appointment.id}`,
-        result.createdSession.id,
+        result.scheduledSession.id,
         'EX',
         ttlSeconds
       ).catch((err) => console.error('[Redis] Failed to cache session:', err));
     }
   }
 
-  return res.status(201).json(toSnakeAppointment(result.appointment));
+  return res.status(existingRecurring ? 200 : 201).json({
+    ...toSnakeAppointment(result.appointment),
+    updated_existing: Boolean(existingRecurring),
+  });
 });
 
 // Update appointment

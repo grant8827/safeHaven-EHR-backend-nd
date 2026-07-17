@@ -162,20 +162,16 @@ const bookSlot = asyncHandler(async (req, res) => {
   const endTime = new Date(startTime);
   endTime.setMinutes(endTime.getMinutes() + 50); // 50-minute sessions
 
+  let existingRecurring = null;
   if (isRecurring) {
-    const existingRecurring = await prisma.appointment.findFirst({
+    existingRecurring = await prisma.appointment.findFirst({
       where: {
         patientId,
         therapistId,
-        isRecurring: true,
+        OR: [{ isRecurring: true }, { seriesId: { not: null } }],
         status: { in: ['scheduled', 'confirmed', 'in_progress'] },
       },
     });
-    if (existingRecurring) {
-      return res.status(409).json({
-        error: 'This client already has a current recurring appointment with this therapist',
-      });
-    }
   }
 
   // Atomic CAS in Redis: slot must be "1" to proceed
@@ -189,11 +185,9 @@ const bookSlot = asyncHandler(async (req, res) => {
   // Persist to PostgreSQL
   let appointment;
   try {
-    appointment = await prisma.appointment.create({
-      data: {
+    const appointmentData = {
         patientId,
         therapistId,
-        createdById: requesterId,
         startTime,
         endTime,
         type: ({
@@ -206,8 +200,8 @@ const bookSlot = asyncHandler(async (req, res) => {
         status: 'scheduled',
         notes: notes || null,
         isRecurring: Boolean(isRecurring),
-      },
-      include: {
+      };
+    const include = {
         patient: {
           include: {
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -216,12 +210,27 @@ const bookSlot = asyncHandler(async (req, res) => {
         therapist: {
           select: { id: true, firstName: true, lastName: true },
         },
-      },
-    });
+      };
+    appointment = existingRecurring
+      ? await prisma.appointment.update({
+          where: { id: existingRecurring.id },
+          data: appointmentData,
+          include,
+        })
+      : await prisma.appointment.create({
+          data: { ...appointmentData, createdById: requesterId },
+          include,
+        });
   } catch (dbErr) {
     // DB write failed — roll back the Redis slot to "1"
     await scheduleHelpers.setSlot(therapistId, date, slot, '1');
     throw dbErr;
+  }
+
+  if (existingRecurring && existingRecurring.startTime.getTime() !== startTime.getTime()) {
+    const oldDate = existingRecurring.startTime.toISOString().slice(0, 10);
+    const oldSlot = `${String(existingRecurring.startTime.getUTCHours()).padStart(2, '0')}${String(existingRecurring.startTime.getUTCMinutes()).padStart(2, '0')}`;
+    await scheduleHelpers.setSlot(therapistId, oldDate, oldSlot, '1').catch(() => {});
   }
 
   // Broadcast to all open browsers
@@ -238,7 +247,8 @@ const bookSlot = asyncHandler(async (req, res) => {
     }
   } catch (_) {}
 
-  return res.status(201).json({
+  return res.status(existingRecurring ? 200 : 201).json({
+    updated_existing: Boolean(existingRecurring),
     appointment: {
       id: appointment.id,
       therapist_id: appointment.therapistId,
