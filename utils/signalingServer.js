@@ -446,6 +446,11 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
         }
       }
     });
+
+    // The connection handler performs asynchronous presence setup before all
+    // event handlers are registered. Clients must wait for this signal before
+    // emitting join-room, otherwise that first join event can be lost.
+    socket.emit('signaling-ready');
   });
 
   return io;
