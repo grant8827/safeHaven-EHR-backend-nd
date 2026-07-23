@@ -14,6 +14,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const Redis = require('ioredis');
 const WebSocket = require('ws');
 const { presenceHelpers, telehealthSessionHelpers } = require('./redis');
+const prisma = require('./prisma');
 
 /**
  * Attach a Socket.io signaling server to an existing HTTP server.
@@ -22,6 +23,41 @@ const { presenceHelpers, telehealthSessionHelpers } = require('./redis');
  * @returns {import('socket.io').Server}
  */
 const createSignalingServer = (httpServer, allowedOrigins = []) => {
+  // One accumulated transcript record per active room. Writes are serialized
+  // so simultaneous therapist/client final results cannot overwrite each other.
+  const transcriptStateByRoom = new Map();
+
+  const persistTranscriptEntry = (roomId, sessionId, entry) => {
+    if (!roomId || !sessionId) return Promise.resolve();
+    let state = transcriptStateByRoom.get(roomId);
+    if (!state) {
+      state = { transcriptId: null, entries: [], writeQueue: Promise.resolve() };
+      transcriptStateByRoom.set(roomId, state);
+    }
+
+    state.entries.push(entry);
+    state.writeQueue = state.writeQueue
+      .then(async () => {
+        const content = JSON.stringify(state.entries);
+        if (!state.transcriptId) {
+          const transcript = await prisma.transcript.create({
+            data: { sessionId, content, isEncrypted: false },
+          });
+          state.transcriptId = transcript.id;
+        } else {
+          await prisma.transcript.update({
+            where: { id: state.transcriptId },
+            data: { content },
+          });
+        }
+      })
+      .catch((error) => {
+        console.error(`[Deepgram] Failed to save transcript for session ${sessionId}:`, error.message);
+      });
+
+    return state.writeQueue;
+  };
+
   const io = new Server(httpServer, {
     cors: {
       origin: allowedOrigins,
@@ -298,6 +334,14 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
               isFinal: result.is_final === true,
             },
           };
+          if (payload.entry.isFinal) {
+            void persistTranscriptEntry(dest, socket.sessionId, {
+              speakerName: payload.entry.speakerName,
+              speakerRole: payload.entry.speakerRole,
+              text: payload.entry.text,
+              timestamp: payload.entry.timestamp,
+            });
+          }
           // Transcript content is visible only to clinical staff. The client
           // contributes consented audio but does not receive transcript text.
           io.in(dest).fetchSockets()
@@ -369,7 +413,12 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
     // ----------------------------------------------------------------
     socket.on('leave-room', async ({ roomId: room }) => {
       closeDeepgram();
-      await handleLeave(socket, io, room, userId, displayName);
+      const dest = room || socket.roomId;
+      await handleLeave(socket, io, dest, userId, displayName);
+      if (dest) {
+        const remaining = await io.in(dest).fetchSockets();
+        if (remaining.length === 0) transcriptStateByRoom.delete(dest);
+      }
     });
 
     // ----------------------------------------------------------------
@@ -391,6 +440,7 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
         // Clean up session meta if room is now empty
         const roomSockets = await io.in(socket.roomId).fetchSockets();
         if (roomSockets.length === 0) {
+          transcriptStateByRoom.delete(socket.roomId);
           await telehealthSessionHelpers.deleteSessionMeta(socket.roomId);
           console.log(`[Signaling] Room ${socket.roomId} is empty – session meta cleaned up`);
         }
