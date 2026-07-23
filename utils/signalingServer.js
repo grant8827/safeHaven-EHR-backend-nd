@@ -12,6 +12,7 @@
 const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const Redis = require('ioredis');
+const WebSocket = require('ws');
 const { presenceHelpers, telehealthSessionHelpers } = require('./redis');
 
 /**
@@ -73,7 +74,27 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
   // ------------------------------------------------------------------
   io.on('connection', async (socket) => {
     const { userId, displayName, userRole } = socket;
+    let deepgramSocket = null;
+    let deepgramKeepAlive = null;
+    let deepgramSpeakerRole = userRole === 'client' ? 'patient' : 'therapist';
     console.log(`[Signaling] 🟢 Connected: ${displayName} (${userId})`);
+
+    const closeDeepgram = () => {
+      if (deepgramKeepAlive) {
+        clearInterval(deepgramKeepAlive);
+        deepgramKeepAlive = null;
+      }
+      if (deepgramSocket) {
+        const connection = deepgramSocket;
+        deepgramSocket = null;
+        if (connection.readyState === WebSocket.OPEN) {
+          connection.send(JSON.stringify({ type: 'Finalize' }));
+          connection.close(1000, 'Transcription stopped');
+        } else if (connection.readyState === WebSocket.CONNECTING) {
+          connection.terminate();
+        }
+      }
+    };
 
     // Join a personal room named after the userId so socket.to(userId) routing works.
     // This is the standard Socket.io pattern for directed 1-to-1 messaging.
@@ -219,6 +240,100 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
       }
     });
 
+    // ----------------------------------------------------------------
+    // Deepgram streaming – each participant sends only their own microphone
+    // audio. Results are broadcast to the room with an explicit role label.
+    // ----------------------------------------------------------------
+    socket.on('start-deepgram-transcription', ({ roomId: room, speakerRole }) => {
+      const dest = room || socket.roomId;
+      const apiKey = process.env.DEEPGRAM_API_KEY;
+      if (!dest || !apiKey) {
+        socket.emit('deepgram-error', {
+          message: apiKey
+            ? 'You must join the session before starting transcription.'
+            : 'Deepgram is not configured on the server.',
+        });
+        return;
+      }
+
+      closeDeepgram();
+      deepgramSpeakerRole = speakerRole === 'patient' ? 'patient' : 'therapist';
+
+      const params = new URLSearchParams({
+        model: 'nova-3',
+        language: 'en-US',
+        smart_format: 'true',
+        interim_results: 'true',
+        endpointing: '300',
+        vad_events: 'true',
+      });
+      deepgramSocket = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, {
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          'Content-Type': 'audio/webm;codecs=opus',
+        },
+      });
+
+      deepgramSocket.on('open', () => {
+        socket.emit('deepgram-ready');
+        deepgramKeepAlive = setInterval(() => {
+          if (deepgramSocket?.readyState === WebSocket.OPEN) {
+            deepgramSocket.send(JSON.stringify({ type: 'KeepAlive' }));
+          }
+        }, 8000);
+      });
+
+      deepgramSocket.on('message', (raw) => {
+        try {
+          const result = JSON.parse(raw.toString());
+          if (result.type !== 'Results') return;
+          const text = result.channel?.alternatives?.[0]?.transcript?.trim();
+          if (!text) return;
+          const payload = {
+            entry: {
+              speakerName: displayName,
+              speakerRole: deepgramSpeakerRole,
+              text,
+              timestamp: Date.now(),
+              isFinal: result.is_final === true,
+            },
+          };
+          // Transcript content is visible only to clinical staff. The client
+          // contributes consented audio but does not receive transcript text.
+          io.in(dest).fetchSockets()
+            .then((roomSockets) => {
+              roomSockets
+                .filter((participant) => ['admin', 'therapist', 'staff'].includes(participant.userRole))
+                .forEach((participant) => participant.emit('deepgram-transcript', payload));
+            })
+            .catch((error) => console.error('[Deepgram] Failed to route transcript:', error.message));
+        } catch (error) {
+          console.error('[Deepgram] Failed to process result:', error.message);
+        }
+      });
+
+      deepgramSocket.on('error', (error) => {
+        console.error(`[Deepgram] Stream error for ${displayName}:`, error.message);
+        socket.emit('deepgram-error', { message: 'The transcription service connection failed.' });
+      });
+
+      deepgramSocket.on('close', (code) => {
+        if (deepgramKeepAlive) {
+          clearInterval(deepgramKeepAlive);
+          deepgramKeepAlive = null;
+        }
+        deepgramSocket = null;
+        socket.emit('deepgram-stopped', { code });
+      });
+    });
+
+    socket.on('deepgram-audio', ({ audio }) => {
+      if (!deepgramSocket || deepgramSocket.readyState !== WebSocket.OPEN || !audio) return;
+      deepgramSocket.send(Buffer.from(audio));
+    });
+
+    socket.on('stop-deepgram-transcription', closeDeepgram);
+
     // ----------------------------------------------------------------    // start-transcription – therapist signals all participants to start
     // ----------------------------------------------------------------
     socket.on('start-transcription', ({ roomId: room }) => {
@@ -253,6 +368,7 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
     // ----------------------------------------------------------------    // leave-room – explicit graceful leave
     // ----------------------------------------------------------------
     socket.on('leave-room', async ({ roomId: room }) => {
+      closeDeepgram();
       await handleLeave(socket, io, room, userId, displayName);
     });
 
@@ -260,6 +376,7 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
     // disconnect – socket dropped (browser closed / network loss)
     // ----------------------------------------------------------------
     socket.on('disconnect', async () => {
+      closeDeepgram();
       console.log(`[Signaling] 🔴 Disconnected: ${displayName} (${userId})`);
       await presenceHelpers.setOffline(userId);
 
