@@ -194,6 +194,31 @@ const createSignalingServer = (httpServer, allowedOrigins = []) => {
       await presenceHelpers.refreshPresence(userId);
     });
 
+    // ----------------------------------------------------------------
+    // request-transcription / transcription-response – explicit consent
+    // handshake before either participant starts speech recognition
+    // ----------------------------------------------------------------
+    socket.on('request-transcription', ({ roomId: room }) => {
+      const dest = room || socket.roomId;
+      if (dest && ['admin', 'therapist', 'staff'].includes(userRole)) {
+        socket.to(dest).emit('request-transcription', {
+          initiatedBy: userId,
+          initiatedByName: displayName,
+        });
+      }
+    });
+
+    socket.on('transcription-response', ({ roomId: room, accepted }) => {
+      const dest = room || socket.roomId;
+      if (dest) {
+        socket.to(dest).emit('transcription-response', {
+          accepted: accepted === true,
+          respondedBy: userId,
+          respondedByName: displayName,
+        });
+      }
+    });
+
     // ----------------------------------------------------------------    // start-transcription – therapist signals all participants to start
     // ----------------------------------------------------------------
     socket.on('start-transcription', ({ roomId: room }) => {
