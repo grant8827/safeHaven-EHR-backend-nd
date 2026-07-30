@@ -428,56 +428,11 @@ const endSession = asyncHandler(async (req, res) => {
       (session.appointment.seriesId && session.appointment.series?.isActive !== false)
     );
     if (isRecurringAppointment) {
-      const nextStart = new Date(session.appointment.startTime);
-      const durationMs = session.appointment.endTime - session.appointment.startTime;
-      const intervalDays = Math.max(1, session.appointment.recurrenceIntervalWeeks || 1) * 7;
-
-      do {
-        nextStart.setDate(nextStart.getDate() + intervalDays);
-      } while (nextStart <= now);
-
-      if (session.appointment.recurrenceEndDate && nextStart > session.appointment.recurrenceEndDate) {
-        await tx.appointment.update({
-          where: { id: session.appointmentId },
-          data: { status: 'completed' },
-        });
-        return tx.telehealthSession.update({
-          where: { id },
-          data: { status: 'ended', endedAt: now, actualDuration },
-          include: { appointment: true, participants: { include: { user: true } } },
-        });
-      }
-
-      const nextEnd = new Date(nextStart.getTime() + durationMs);
-      rolledSchedule = {
-        therapistId: session.appointment.therapistId,
-        previousStart: session.appointment.startTime,
-        nextStart,
-      };
-
-      await tx.appointment.update({
-        where: { id: session.appointmentId },
-        data: {
-          startTime: nextStart,
-          endTime: nextEnd,
-          status: 'scheduled',
-          isRecurring: true,
-        },
-      });
-
-      await tx.telehealthParticipant.updateMany({
-        where: { sessionId: id },
-        data: { status: 'waiting', joinedAt: null, leftAt: null },
-      });
-
+      // Do not move the appointment immediately. The recurring worker keeps
+      // this occurrence visible until three hours after its scheduled start.
       return tx.telehealthSession.update({
         where: { id },
-        data: {
-          status: 'scheduled',
-          startedAt: null,
-          endedAt: null,
-          actualDuration,
-        },
+        data: { status: 'ended', endedAt: now, actualDuration },
         include: {
           appointment: true,
           participants: {
@@ -643,9 +598,19 @@ const joinSession = asyncHandler(async (req, res) => {
     }
   }
 
+  // An assigned therapist or client entering the room is enough to activate
+  // a scheduled session. This avoids requiring clients to call the
+  // therapist-only /start endpoint before WebRTC can initialise.
+  if (session.status === 'scheduled') {
+    await prisma.telehealthSession.update({
+      where: { id },
+      data: { status: 'active', startedAt: session.startedAt || new Date() },
+    });
+  }
+
   const updatedParticipant = await prisma.telehealthParticipant.update({
     where: { id: participant.id },
-    data: { joinedAt: new Date() },
+    data: { joinedAt: new Date(), status: 'connected' },
     include: {
       session: true,
       user: {

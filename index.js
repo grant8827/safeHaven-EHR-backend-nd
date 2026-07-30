@@ -179,11 +179,26 @@ httpServer.listen(PORT, async () => {
   // occurrence each. Runs once at startup, then hourly, so the next
   // occurrence appears fairly promptly once the current one passes (or is
   // cancelled) rather than waiting up to a full day.
-  const { topUpAllActiveSeries } = require('./utils/recurringAppointments');
+  const {
+    topUpAllActiveSeries,
+    rollForwardExpiredRecurringAppointments,
+  } = require('./utils/recurringAppointments');
   topUpAllActiveSeries().catch((err) => console.error('[RecurringAppointments] Initial top-up failed:', err));
+  rollForwardExpiredRecurringAppointments()
+    .catch((err) => console.error('[RecurringAppointments] Initial roll-forward failed:', err));
+  const { ensureTelehealthSessionsForAppointments } = require('./utils/telehealthSession');
+  ensureTelehealthSessionsForAppointments()
+    .then((created) => {
+      if (created > 0) console.log(`[Telehealth] Backfilled ${created} missing appointment session(s)`);
+    })
+    .catch((err) => console.error('[Telehealth] Session backfill failed:', err));
   setInterval(() => {
     topUpAllActiveSeries().catch((err) => console.error('[RecurringAppointments] Scheduled top-up failed:', err));
   }, 60 * 60 * 1000);
+  setInterval(() => {
+    rollForwardExpiredRecurringAppointments()
+      .catch((err) => console.error('[RecurringAppointments] Scheduled roll-forward failed:', err));
+  }, 5 * 60 * 1000);
 
   console.log('');
 });

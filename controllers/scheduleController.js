@@ -1,6 +1,7 @@
 const { scheduleHelpers } = require('../utils/redis');
 const { asyncHandler } = require('../middleware/errorHandler');
 const prisma = require('../utils/prisma');
+const { createTelehealthSessionForAppointment } = require('../utils/telehealthSession');
 
 // All valid time slots: 08:00 – 17:30 in 30-min increments
 const SLOT_TIMES = [
@@ -211,17 +212,45 @@ const bookSlot = asyncHandler(async (req, res) => {
         therapist: {
           select: { id: true, firstName: true, lastName: true },
         },
+        session: true,
       };
-    appointment = existingRecurring
-      ? await prisma.appointment.update({
-          where: { id: existingRecurring.id },
-          data: appointmentData,
-          include,
-        })
-      : await prisma.appointment.create({
-          data: { ...appointmentData, createdById: requesterId },
-          include,
+    appointment = await prisma.$transaction(async (tx) => {
+      const saved = existingRecurring
+        ? await tx.appointment.update({
+            where: { id: existingRecurring.id },
+            data: appointmentData,
+            include,
+          })
+        : await tx.appointment.create({
+            data: { ...appointmentData, createdById: requesterId },
+            include,
+          });
+
+      if (saved.session) {
+        await tx.telehealthSession.update({
+          where: { id: saved.session.id },
+          data: {
+            status: 'scheduled',
+            startedAt: null,
+            endedAt: null,
+            scheduledDuration: 50,
+          },
         });
+        await tx.telehealthParticipant.updateMany({
+          where: { sessionId: saved.session.id },
+          data: { status: 'invited', joinedAt: null, leftAt: null },
+        });
+      } else {
+        await createTelehealthSessionForAppointment(tx, {
+          appointmentId: saved.id,
+          patientId: saved.patientId,
+          therapistId: saved.therapistId,
+          patientUserId: saved.patient.user.id,
+          durationMinutes: 50,
+        });
+      }
+      return saved;
+    });
   } catch (dbErr) {
     // DB write failed — roll back the Redis slot to "1"
     await scheduleHelpers.setSlot(therapistId, date, slot, '1');

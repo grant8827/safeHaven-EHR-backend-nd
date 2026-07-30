@@ -180,9 +180,6 @@ const createAppointment = asyncHandler(async (req, res) => {
 
   // Determine appointment type
   const finalAppointmentType = type || appointmentType || 'therapy_session';
-  // Create a telehealth session if type is telehealth OR if telehealthLink was provided
-  const isTelehealth = finalAppointmentType === 'telehealth' || (telehealthLink != null && telehealthLink !== '');
-
   // Calculate duration in minutes
   const durationMinutes = duration || Math.round((new Date(calculatedEndTime) - new Date(startTime)) / 60000);
 
@@ -239,7 +236,7 @@ const createAppointment = asyncHandler(async (req, res) => {
         });
 
     let scheduledSession = null;
-    if (isTelehealth && appointment.session) {
+    if (appointment.session) {
       scheduledSession = await tx.telehealthSession.update({
         where: { id: appointment.session.id },
         data: {
@@ -253,7 +250,7 @@ const createAppointment = asyncHandler(async (req, res) => {
         where: { sessionId: appointment.session.id },
         data: { status: 'invited', joinedAt: null, leftAt: null },
       });
-    } else if (isTelehealth) {
+    } else {
       scheduledSession = await createTelehealthSessionForAppointment(tx, {
         appointmentId: appointment.id,
         patientId,
@@ -349,10 +346,6 @@ const updateAppointment = asyncHandler(async (req, res) => {
     }
   }
 
-  // Check if the appointment is being changed to telehealth
-  const finalType = type || appointmentType;
-  const isChangingToTelehealth = finalType === 'telehealth';
-
   const result = await prisma.$transaction(async (tx) => {
     // Update the appointment
     const appointment = await tx.appointment.update({
@@ -383,9 +376,9 @@ const updateAppointment = asyncHandler(async (req, res) => {
       },
     });
 
-    // If the appointment is now telehealth and doesn't have a session, create one
+    // Every appointment has a telehealth room, regardless of its appointment type.
     let newSession = null;
-    if (isChangingToTelehealth && !appointment.session) {
+    if (!appointment.session) {
       const durationMinutes = duration || Math.round((appointment.endTime - appointment.startTime) / 60000);
       newSession = await createTelehealthSessionForAppointment(tx, {
         appointmentId: appointment.id,

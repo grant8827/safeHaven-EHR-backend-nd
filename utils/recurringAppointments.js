@@ -17,7 +17,7 @@ function nextOccurrenceOnOrAfter(fromDate, dayOfWeek, hour, minute) {
   return d;
 }
 
-// Creates one materialized Appointment (+ telehealth session, if applicable)
+// Creates one materialized Appointment and its telehealth session.
 // for a series at a given start time. Mirrors the single-appointment path in
 // appointmentsController.createAppointment so recurring occurrences behave
 // exactly like any other appointment.
@@ -42,24 +42,21 @@ async function createOneOccurrence(tx, series, occurrenceStart) {
     },
   });
 
-  let createdSession = null;
-  if (series.type === 'telehealth') {
-    createdSession = await createTelehealthSessionForAppointment(tx, {
-      appointmentId: appointment.id,
-      patientId: series.patientId,
-      therapistId: series.therapistId,
-      patientUserId: appointment.patient.user.id,
-      durationMinutes: series.durationMinutes,
-    });
+  const createdSession = await createTelehealthSessionForAppointment(tx, {
+    appointmentId: appointment.id,
+    patientId: series.patientId,
+    therapistId: series.therapistId,
+    patientUserId: appointment.patient.user.id,
+    durationMinutes: series.durationMinutes,
+  });
 
-    if (redisClient) {
-      await redisClient.set(
-        `telehealth:appt:${appointment.id}`,
-        createdSession.id,
-        'EX',
-        series.durationMinutes * 60
-      ).catch((err) => console.error('[Redis] Failed to cache session:', err));
-    }
+  if (redisClient) {
+    await redisClient.set(
+      `telehealth:appt:${appointment.id}`,
+      createdSession.id,
+      'EX',
+      series.durationMinutes * 60
+    ).catch((err) => console.error('[Redis] Failed to cache session:', err));
   }
 
   return appointment;
@@ -134,6 +131,65 @@ async function topUpAllActiveSeries() {
   return totalCreated;
 }
 
+// Keep the current occurrence visible for three hours after its scheduled
+// start. Once that grace period expires, reuse the appointment/session rows
+// for the next weekly occurrence.
+async function rollForwardExpiredRecurringAppointments() {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  const expired = await prisma.appointment.findMany({
+    where: {
+      OR: [{ isRecurring: true }, { seriesId: { not: null } }],
+      status: { notIn: ['cancelled', 'completed'] },
+      startTime: { lte: cutoff },
+    },
+    include: { session: true, series: true },
+  });
+
+  let rolled = 0;
+  for (const appointment of expired) {
+    const intervalDays = Math.max(1, appointment.recurrenceIntervalWeeks || 1) * 7;
+    const nextStart = new Date(appointment.startTime);
+    do {
+      nextStart.setDate(nextStart.getDate() + intervalDays);
+    } while (nextStart <= now);
+
+    const recurrenceEnd = appointment.recurrenceEndDate;
+    const seriesActive = !appointment.series || appointment.series.isActive !== false;
+    if (!seriesActive || (recurrenceEnd && nextStart > recurrenceEnd)) {
+      // eslint-disable-next-line no-await-in-loop
+      await prisma.appointment.update({ where: { id: appointment.id }, data: { status: 'completed' } });
+      continue;
+    }
+
+    const durationMs = appointment.endTime.getTime() - appointment.startTime.getTime();
+    // eslint-disable-next-line no-await-in-loop
+    await prisma.$transaction(async (tx) => {
+      await tx.appointment.update({
+        where: { id: appointment.id },
+        data: {
+          startTime: nextStart,
+          endTime: new Date(nextStart.getTime() + durationMs),
+          status: 'scheduled',
+          isRecurring: true,
+        },
+      });
+      if (appointment.session) {
+        await tx.telehealthSession.update({
+          where: { id: appointment.session.id },
+          data: { status: 'scheduled', startedAt: null, endedAt: null, actualDuration: null },
+        });
+        await tx.telehealthParticipant.updateMany({
+          where: { sessionId: appointment.session.id },
+          data: { status: 'invited', joinedAt: null, leftAt: null },
+        });
+      }
+    });
+    rolled += 1;
+  }
+  return rolled;
+}
+
 /**
  * Stops a series: marks it inactive (top-up no longer extends it) and
  * cancels any not-yet-occurred generated appointments. Past/in-progress
@@ -160,5 +216,6 @@ async function stopSeries(seriesId) {
 module.exports = {
   createSeriesAndGenerateAppointments,
   topUpAllActiveSeries,
+  rollForwardExpiredRecurringAppointments,
   stopSeries,
 };
